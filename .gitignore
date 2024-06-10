@@ -1,0 +1,8 @@
+*.nvvp
+*bin/*
+*cub/*
+*test/*
+*.csv
+*.txt
+Makefile
+README.module

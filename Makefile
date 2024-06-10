@@ -4,17 +4,17 @@ CUDA_BIN_PATH   ?= $(CUDA_PATH)/bin
 
 NVCC = nvcc
 
-SM_TARGETS   = -gencode=arch=compute_52,code=\"sm_52,compute_52\" 
-SM_DEF     = -DSM520
+SM_TARGETS   = -gencode=arch=compute_60,code=\"sm_60,compute_60\" 
+SM_DEF     = -DSM600
 
 #SM_TARGETS   = -gencode=arch=compute_70,code=\"sm_70,compute_70\" 
 #SM_DEF     = -DSM700
 
-GENCODE_SM50    := -gencode arch=compute_52,code=sm_52
+GENCODE_SM50    := -gencode arch=compute_60,code=sm_60
 #GENCODE_SM70    := -gencode arch=compute_70,code=sm_70
 GENCODE_FLAGS   := $(GENCODE_SM50)
 
-NVCCFLAGS += --std=c++11 $(SM_DEF) -Xptxas="-dlcm=cg -v" -lineinfo -Xcudafe -\# 
+NVCCFLAGS += --std=c++17 $(SM_DEF) -Xptxas="-dlcm=cg -v" -lineinfo -Xcudafe -\# 
 
 SRC = src
 BIN = bin

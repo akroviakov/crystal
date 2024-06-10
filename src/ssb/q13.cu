@@ -23,6 +23,40 @@ bool                    g_verbose = false;  // Whether to display input/output t
 cub::CachingDeviceAllocator  g_allocator(true);  // Caching allocator for device memory
 
 template<int BLOCK_THREADS, int ITEMS_PER_THREAD>
+__global__ void DeviceSelectIfCompiled(int* lo_orderdate, int* lo_discount, int* lo_quantity, int* lo_extendedprice,
+    int lo_num_entries, unsigned long long* revenue, int batchId=-1) {
+
+  long long sum = 0;
+  int blockIndex = (batchId == -1) ? blockIdx.x : batchId + blockIdx.x;
+  int tile_offset = blockIndex * TILE_SIZE;
+  int num_tiles = (lo_num_entries + TILE_SIZE - 1) / TILE_SIZE;
+  int num_tile_items = TILE_SIZE;
+  if (blockIndex == num_tiles - 1) {
+    num_tile_items = lo_num_entries - tile_offset;
+  }
+
+  for(int i = 0; i < ITEMS_PER_THREAD; i++){
+    if(threadIdx.x + i * BLOCK_THREADS < num_tile_items){
+      int offset = tile_offset + threadIdx.x + BLOCK_THREADS * i;
+      if(offset < lo_num_entries){
+        if(lo_orderdate[offset] >= 19940204 && lo_orderdate[offset] <= 19940210 && 
+            lo_quantity[offset] >= 26 && lo_quantity[offset] <= 35 && 
+            lo_discount[offset] >= 5 && lo_discount[offset] <= 7){
+          sum += lo_discount[offset] * lo_extendedprice[offset];
+        }
+      }
+    }
+  }
+  __syncthreads();
+  static __shared__ long long buffer[32];
+  unsigned long long aggregate = BlockSum<long long, BLOCK_THREADS, ITEMS_PER_THREAD>(sum, (long long*)buffer);
+  __syncthreads();
+  if (threadIdx.x == 0) {
+    atomicAdd(revenue, aggregate);
+  }
+}
+
+template<int BLOCK_THREADS, int ITEMS_PER_THREAD>
 __global__ void DeviceSelectIf(int* lo_orderdate, int* lo_discount, int* lo_quantity, int* lo_extendedprice,
     int lo_num_entries, unsigned long long* revenue) {
   // Load a segment of consecutive items that are blocked across threads
@@ -73,6 +107,13 @@ __global__ void DeviceSelectIf(int* lo_orderdate, int* lo_discount, int* lo_quan
   }
 }
 
+enum QueryVariant {
+    Vector = 0,
+    Compiled = 1,
+    Compiled_Multi = 2
+};
+
+template<QueryVariant QImpl>
 float runQuery(int* lo_orderdate, int* lo_discount, int* lo_quantity, int* lo_extendedprice, 
     int lo_num_entries, cub::CachingDeviceAllocator&  g_allocator) {
   SETUP_TIMING();
@@ -89,9 +130,21 @@ float runQuery(int* lo_orderdate, int* lo_discount, int* lo_quantity, int* lo_ex
   cudaMemset(d_sum, 0, sizeof(long long));
 
   // Run
-  int tile_items = 128*4;
-  TIME_FUNC((DeviceSelectIf<128,4><<<(lo_num_entries + tile_items - 1)/tile_items, 128>>>(lo_orderdate, 
+  if constexpr(QImpl == QueryVariant::Vector){
+    int tile_items = 128*4;
+    TIME_FUNC((DeviceSelectIf<128,4><<<(lo_num_entries + tile_items - 1)/tile_items, 128>>>(lo_orderdate, 
+            lo_discount, lo_quantity, lo_extendedprice, lo_num_entries, d_sum)), time_query);
+  } else {
+    constexpr int batchSize{20000};
+    constexpr int numBatches{(LO_LEN + batchSize - 1) / batchSize};
+    constexpr int numThreads{1024};
+    constexpr int elemPerThread{batchSize / numThreads + 1};
+    if constexpr(QImpl == QueryVariant::Compiled){
+      constexpr int numBlocks{numBatches};
+      TIME_FUNC((DeviceSelectIfCompiled<numThreads,elemPerThread><<<numBlocks, numThreads>>>(lo_orderdate, 
           lo_discount, lo_quantity, lo_extendedprice, lo_num_entries, d_sum)), time_query);
+    }
+  }
 
   cudaEventRecord(stop, 0);
   cudaEventSynchronize(stop);
@@ -152,12 +205,24 @@ int main(int argc, char** argv)
   int *d_d_year = loadToGPU<int>(h_d_year, D_LEN, g_allocator);
 
   cout << "** LOADED DATA TO GPU **" << endl;
-
+  cout << "** VECTOR TEST **" << endl;
   for (int t = 0; t < num_trials; t++) {
     float time_query;
-    time_query = runQuery(d_lo_orderdate, d_lo_discount, d_lo_quantity, d_lo_extendedprice, LO_LEN, g_allocator);
+    time_query = runQuery<QueryVariant::Vector>(d_lo_orderdate, d_lo_discount, d_lo_quantity, d_lo_extendedprice, LO_LEN, g_allocator);
     cout<< "{"
-        << "\"query\":13" 
+        << "\"type\":vec" 
+        << ",\"query\":13" 
+        << ",\"time_query\":" << time_query
+        << "}" << endl;
+  }
+
+  cout << "** COMPILED TEST **" << endl;
+  for (int t = 0; t < num_trials; t++) {
+    float time_query;
+    time_query = runQuery<QueryVariant::Compiled>(d_lo_orderdate, d_lo_discount, d_lo_quantity, d_lo_extendedprice, LO_LEN, g_allocator);
+    cout<< "{"
+        << "\"type\":comp" 
+        << ",\"query\":13" 
         << ",\"time_query\":" << time_query
         << "}" << endl;
   }
