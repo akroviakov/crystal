@@ -4,8 +4,8 @@ DATA_DIR=$1
 SF=$2
 MODE=$3
 
-# make clean
-# make
+make clean
+make
 
 SCRIPT_PATH=$(realpath "$0")
 SCRIPT_DIR=$(dirname "$SCRIPT_PATH")
@@ -20,7 +20,7 @@ do
     filename=$(basename "$file" .cu)
     echo "Processing $filename"
     pushd "$SCRIPT_DIR"
-    # make bin/ssb/$filename
+    make bin/ssb/$filename
     popd
     QUERIES+=("$filename")
 done
@@ -38,7 +38,7 @@ CSV_OUTPUT_FILE="$MEASUREMENTS_DIR/$REPORT.csv"
 rm -rf $RAW_OUTPUT_FILE
 rm -rf $CSV_OUTPUT_FILE
 
-metrics=inst_per_warp,l2_utilization,unique_warps_launched,achieved_occupancy,dram_read_bytes,dram_write_bytes,stall_memory_dependency,stall_exec_dependency,stall_inst_fetch,local_hit_rate
+metrics=inst_per_warp,l2_utilization,unique_warps_launched,achieved_occupancy,gld_throughput,gld_transactions,gst_transactions,stall_memory_dependency
 # ,dram_read_transactions,dram_write_transactions
 for q in ${QUERIES[@]}
 do

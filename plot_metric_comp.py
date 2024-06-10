@@ -19,12 +19,20 @@ def plot_metric(file, SF):
     percent_cols = pivot_df.select_dtypes(include=['object']).columns[pivot_df.select_dtypes(include=['object']).apply(lambda x: x.str.contains('%')).any()]
     pivot_df[percent_cols] = pivot_df[percent_cols].replace({'%': ''}, regex=True).astype(float)
     pivot_df.rename(columns=lambda x: x + ' (%)' if x in percent_cols else x, inplace=True)
+
+    percent_cols = pivot_df.select_dtypes(include=['object']).columns[pivot_df.select_dtypes(include=['object']).apply(lambda x: x.str.contains('GB/s')).any()]
+    pivot_df[percent_cols] = pivot_df[percent_cols].replace({'GB/s': ''}, regex=True).astype(float)
+    pivot_df.rename(columns=lambda x: x + ' GB/s' if x in percent_cols else x, inplace=True)
+
     pivot_df['Kernel'] = pivot_df['Kernel'].str.extract(r'\s(\w+)<')
 
     # melted_df = melted_df.set_index(["Kernel", "Statistic", "Metric Name"]).unstack()
     pivot_df = pivot_df[pivot_df['Statistic'] == 'Avg']
-    pivot_df = pivot_df.drop(columns=["Statistic", 'l2_utilization', "local_hit_rate (%)"])
-
+    pivot_df.drop(columns=["Statistic", 'l2_utilization'], inplace=True)
+    if 'local_hit_rate (%)' in pivot_df.columns:
+        pivot_df.drop(columns=['local_hit_rate (%)'], inplace=True)
+    if 'l2_utilization' in pivot_df.columns:
+        pivot_df.drop(columns=['l2_utilization'], inplace=True)
 
     pivot_df.set_index('Kernel', inplace=True)
     bar_width = 0.35
@@ -51,8 +59,8 @@ def plot_metric(file, SF):
     # Number of columns to plot
     columns_to_plot = pivot_df.columns
     # Create subplots
-    fig, axes = plt.subplots(len(kernel_pairs), len(columns_to_plot), figsize=(5 * len(kernel_pairs), len(columns_to_plot)))
-    bar_width = 0.4
+    fig, axes = plt.subplots(len(kernel_pairs), len(columns_to_plot), figsize=(3 * len(columns_to_plot), 3* len(kernel_pairs)))
+    bar_width = 0.1
 
     for i, (base_kernel, compiled_kernel) in enumerate(kernel_pairs):
         for j, column in enumerate(columns_to_plot):
@@ -64,8 +72,9 @@ def plot_metric(file, SF):
             ax.bar(1 - bar_width / 2, pivot_df.loc[base_kernel, column], bar_width, label=base_kernel, zorder=2, color='blue')
             ax.bar(1 + bar_width / 2, pivot_df.loc[compiled_kernel, column], bar_width, label=compiled_kernel, zorder=2, color='orange')
             ax.set_title(column)
+            ax.set_xticks([])
             if j==0:
-                ax.legend(loc='center right', bbox_to_anchor=(-0.5, 0.5))
+                ax.legend(loc='center right', bbox_to_anchor=(-0.3, 0.5))
            
 
     fig.tight_layout()
@@ -84,4 +93,3 @@ if __name__ == '__main__':
     args = parser.parse_args()
     for p in glob.glob(f"{args.CSV_DIR}/*.csv"):
         plot_metric(p, args.SF)
-        exit(-1)
