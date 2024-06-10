@@ -7,7 +7,7 @@
 
 using namespace std;
 
-#define SF 10
+#define SF 1
 
 #define BASE_PATH "/home/kroviakov/lingodb/crystal/test/ssb/data/"
 

@@ -313,8 +313,11 @@ float runQuery(int* lo_orderdate, int* lo_custkey, int* lo_partkey, int* lo_supp
     int *c_custkey, int* c_region, int* c_nation, int c_len,
     cub::CachingDeviceAllocator&  g_allocator) {
   SETUP_TIMING();
+  cudaEvent_t stop_build; cudaEventCreate(&stop_build);
 
   float time_query;
+  float time_build;
+
   chrono::high_resolution_clock::time_point st, finish;
   st = chrono::high_resolution_clock::now();
 
@@ -366,9 +369,13 @@ float runQuery(int* lo_orderdate, int* lo_custkey, int* lo_partkey, int* lo_supp
       build_hashtable_d_Compiled<numThreads,elemPerThread><<<numBatchesD, numThreads>>>(d_datekey, d_year, d_len, ht_d, d_val_len, d_val_min);
     }
   }
-  CubDebugExit(cudaMemcpy(s_res, ht_s, s_len * 2 * sizeof(int), cudaMemcpyDeviceToHost));
-  CubDebugExit(cudaMemcpy(c_res, ht_c, c_len * 2 * sizeof(int), cudaMemcpyDeviceToHost));
-  CubDebugExit(cudaMemcpy(p_res, ht_p, p_len * 2 * sizeof(int), cudaMemcpyDeviceToHost));
+  cudaEventRecord(stop_build, 0);
+  cudaEventSynchronize(stop_build);
+  cudaEventElapsedTime(&time_build, start, stop_build);
+
+  // CubDebugExit(cudaMemcpy(s_res, ht_s, s_len * 2 * sizeof(int), cudaMemcpyDeviceToHost));
+  // CubDebugExit(cudaMemcpy(c_res, ht_c, c_len * 2 * sizeof(int), cudaMemcpyDeviceToHost));
+  // CubDebugExit(cudaMemcpy(p_res, ht_p, p_len * 2 * sizeof(int), cudaMemcpyDeviceToHost));
 
 #if 0
   int *h_ht_s = new int[s_len * 2];
@@ -443,6 +450,7 @@ float runQuery(int* lo_orderdate, int* lo_custkey, int* lo_partkey, int* lo_supp
   }
 
   cout << "Res Count: " << res_count << endl;
+  cout << "Time Build: " << time_build << endl;
   cout << "Time Taken Total: " << diff.count() * 1000 << endl;
 
   delete[] h_res;
