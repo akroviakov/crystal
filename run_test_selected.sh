@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 
+# Example: ./run_test_selected.sh ~/somepath/resources/data/ssb_simplified/ 1 PROFILE
 DATA_DIR=$1
 SF=$2
 MODE=$3
@@ -12,7 +13,7 @@ SCRIPT_DIR=$(dirname "$SCRIPT_PATH")
 
 pushd "src/ssb"
 sed -i "s/#define SF [^ ]*/#define SF $SF/g" ssb_utils.h
-files=("q11.cu" "q12.cu" "q13.cu" "q21.cu" "q23.cu" "q41.cu")
+files=("q11.cu" "q12.cu" "q13.cu" "q21.cu" "q22.cu" "q23.cu" "q41.cu" "q42.cu")
 QUERIES=()
 
 for file in "${files[@]}"

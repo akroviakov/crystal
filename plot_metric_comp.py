@@ -76,7 +76,7 @@ def plot_metric(file, SF):
             if j==0:
                 ax.legend(loc='center right', bbox_to_anchor=(-0.3, 0.5))
            
-
+    fig.suptitle(f"{extract_filename(file)}")
     fig.tight_layout()
     plots_dir=f"Plots/SF_{SF}/Metrics"
     if not os.path.exists(plots_dir):

@@ -350,7 +350,7 @@ float runQuery(int* lo_orderdate, int* lo_custkey, int* lo_partkey, int* lo_supp
     /*CHECK_ERROR();*/
     build_hashtable_d<128,4><<<(d_len + tile_items - 1)/tile_items, 128>>>(d_datekey, d_year, d_len, ht_d, d_val_len, d_val_min);
     /*CHECK_ERROR();*/
-  }  else {
+  } else {
     if constexpr(QImpl == QueryVariant::Compiled){
       // build_hashtable_s_Compiled<128,4><<<(s_len + tile_items - 1)/tile_items, 128>>>(s_region, s_suppkey, s_len, ht_s, s_len);
       // build_hashtable_c_Compiled<128,4><<<(c_len + tile_items - 1)/tile_items, 128>>>(c_region, c_custkey, c_nation, c_len, ht_c, c_len);
@@ -537,7 +537,7 @@ int main(int argc, char** argv)
         d_s_suppkey, d_s_region, S_LEN,
         d_c_custkey, d_c_region, d_c_nation, C_LEN,
         g_allocator);
-        cout<< "{"
+    cout<< "{"
         << "\"type\":vec" 
         << ",\"query\":41" 
         << ",\"time_query\":" << time_query

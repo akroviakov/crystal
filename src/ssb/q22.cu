@@ -22,6 +22,45 @@ using namespace std;
 bool                    g_verbose = false;  // Whether to display input/output to console
 cub::CachingDeviceAllocator  g_allocator(true);  // Caching allocator for device memory
 
+template<int BLOCK_THREADS, int ITEMS_PER_THREAD>
+__global__ void probeCompiled(int* lo_orderdate, int* lo_partkey, int* lo_suppkey, int* lo_revenue, int lo_len,
+    int* ht_s, int s_len,
+    int* ht_p, int p_len,
+    int* ht_d, int d_len,
+    int* res) {
+  // Load a tile striped across threads
+
+  int tile_offset = blockIdx.x * TILE_SIZE;
+  int num_tiles = (lo_len + TILE_SIZE - 1) / TILE_SIZE;
+  int num_tile_items = TILE_SIZE;
+
+  if (blockIdx.x == num_tiles - 1) {
+    num_tile_items = lo_len - tile_offset;
+  }
+  for(int i = 0; i < ITEMS_PER_THREAD; i++){
+    if(threadIdx.x + i * BLOCK_THREADS < num_tile_items){
+      int offset = tile_offset + threadIdx.x + BLOCK_THREADS * i;
+      if(offset >= lo_len) {continue;}
+      int hash_s = HASH(lo_suppkey[offset], s_len, 0);
+      if(ht_s[hash_s]){
+        int hash_p = HASH(lo_partkey[offset], p_len, 0);
+        uint64_t slot = *reinterpret_cast<uint64_t*>(&ht_p[hash_p << 1]);
+        if(slot){
+          int brand = (slot >> 32);
+          int hash_d = HASH(lo_orderdate[offset], d_len, 19920101);
+          uint64_t slot_d = *reinterpret_cast<uint64_t*>(&ht_d[hash_d << 1]);
+          if(slot_d){
+            int year = (slot_d >> 32);
+            int hash_res = (brand * 7 + (year - 1992)) % ((1998-1992+1) * (5*5*40));
+            res[hash_res * 4] = year;
+            res[hash_res * 4 + 1] = brand;
+            atomicAdd(reinterpret_cast<unsigned long long*>(&res[hash_res * 4 + 2]), (long long)(lo_revenue[offset]));
+          }
+        }
+      }
+    }
+  }
+}
 
 template<int BLOCK_THREADS, int ITEMS_PER_THREAD>
 __global__ void probe(int* lo_orderdate, int* lo_partkey, int* lo_suppkey, int* lo_revenue, int lo_len,
@@ -68,6 +107,91 @@ __global__ void probe(int* lo_orderdate, int* lo_partkey, int* lo_suppkey, int* 
         res[hash * 4 + 1] = brand[ITEM];
         atomicAdd(reinterpret_cast<unsigned long long*>(&res[hash * 4 + 2]), (long long)(revenue[ITEM]));
       }
+    }
+  }
+}
+
+template<int BLOCK_THREADS, int ITEMS_PER_THREAD>
+__global__ void build_hashtable_s_Compiled(int *filter_col, int *dim_key, int num_tuples, int *hash_table, int num_slots) {
+  int tile_offset = blockIdx.x * TILE_SIZE;
+  int num_tiles = (num_tuples + TILE_SIZE - 1) / TILE_SIZE;
+  int num_tile_items = TILE_SIZE;
+
+  if (blockIdx.x == num_tiles - 1) {
+    num_tile_items = num_tuples - tile_offset;
+  }
+
+  for(int i = 0; i < ITEMS_PER_THREAD; i++){
+    if(threadIdx.x + i * BLOCK_THREADS < num_tile_items){
+      int offset = tile_offset + threadIdx.x + BLOCK_THREADS * i;
+      if(offset < num_tuples && filter_col[offset] == 2){
+        int hash = HASH(dim_key[offset], num_slots, 0);
+        atomicCAS(&hash_table[hash], 0, dim_key[offset]);
+      }
+    }
+  }
+}
+
+template<int BLOCK_THREADS, int ITEMS_PER_THREAD>
+__global__ void build_hashtable_p_Compiled(int *dim_key, int *dim_val, int num_tuples, int *hash_table, int num_slots) {
+  int tile_offset = blockIdx.x * TILE_SIZE;
+  int num_tiles = (num_tuples + TILE_SIZE - 1) / TILE_SIZE;
+  int num_tile_items = TILE_SIZE;
+
+  if (blockIdx.x == num_tiles - 1) {
+    num_tile_items = num_tuples - tile_offset;
+  }
+
+  for(int i = 0; i < ITEMS_PER_THREAD; i++){
+    if(threadIdx.x + i * BLOCK_THREADS < num_tile_items){
+      int offset = tile_offset + threadIdx.x + BLOCK_THREADS * i;
+      if(offset < num_tuples && dim_val[offset] >= 260 && dim_val[offset] <= 267){
+        int hash = HASH(dim_key[offset], num_slots, 0);
+        atomicCAS(&hash_table[hash << 1], 0, dim_key[offset]);
+        hash_table[(hash << 1) + 1] = dim_val[offset];
+      }
+    }
+  }
+}
+
+template<int BLOCK_THREADS, int ITEMS_PER_THREAD>
+__global__ void build_hashtable_d_Compiled(int *dim_key, int *dim_val, int num_tuples, int *hash_table, int num_slots) {
+  int tile_offset = blockIdx.x * TILE_SIZE;
+  int num_tiles = (num_tuples + TILE_SIZE - 1) / TILE_SIZE;
+  int num_tile_items = TILE_SIZE;
+
+  if (blockIdx.x == num_tiles - 1) {
+    num_tile_items = num_tuples - tile_offset;
+  }
+
+  for(int i = 0; i < ITEMS_PER_THREAD; i++){
+    if(threadIdx.x + i * BLOCK_THREADS < num_tile_items){
+      int offset = tile_offset + threadIdx.x + BLOCK_THREADS * i;
+      if(offset < num_tuples && dim_val[offset] >= 260 && dim_val[offset] <= 267){
+        int hash = HASH(dim_key[offset], num_slots, 0);
+        atomicCAS(&hash_table[hash << 1], 0, dim_key[offset]);
+        hash_table[(hash << 1) + 1] = dim_val[offset];
+      }
+    }
+  }
+}
+
+template<int BLOCK_THREADS, int ITEMS_PER_THREAD>
+__global__ void build_hashtable_d_Compiled(int *dim_key, int *dim_val, int num_tuples, int *hash_table, int num_slots, int val_min) {
+  int tile_offset = blockIdx.x * TILE_SIZE;
+  int num_tiles = (num_tuples + TILE_SIZE - 1) / TILE_SIZE;
+  int num_tile_items = TILE_SIZE;
+
+  if (blockIdx.x == num_tiles - 1) {
+    num_tile_items = num_tuples - tile_offset;
+  }
+
+  for(int i = 0; i < ITEMS_PER_THREAD; i++){
+    if(threadIdx.x + i * BLOCK_THREADS < num_tile_items){
+      int offset = tile_offset + threadIdx.x + BLOCK_THREADS * i;
+      int hash = HASH(dim_key[offset], num_slots, val_min);
+      atomicCAS(&hash_table[hash << 1], 0, dim_key[offset]);
+      hash_table[(hash << 1) + 1] = dim_val[offset];
     }
   }
 }
@@ -138,7 +262,13 @@ __global__ void build_hashtable_d(int *dim_key, int *dim_val, int num_tuples, in
       hash_table, num_slots, val_min, num_tile_items);
 }
 
+enum QueryVariant {
+    Vector = 0,
+    Compiled = 1,
+    Compiled_Multi = 2
+};
 
+template<QueryVariant QImpl>
 float runQuery(int* lo_orderdate, int* lo_partkey, int* lo_suppkey, int* lo_revenue, int lo_len,
     int* p_partkey, int* p_brand1, int p_len,
     int *d_datekey, int* d_year, int d_len,
@@ -163,16 +293,31 @@ float runQuery(int* lo_orderdate, int* lo_partkey, int* lo_suppkey, int* lo_reve
   CubDebugExit(cudaMemset(ht_s, 0, 2 * s_len * sizeof(int)));
 
   int tile_items = 128*4;
+  int d_val_min = 19920101;
+
+  if constexpr(QImpl == QueryVariant::Vector){
+
   build_hashtable_s<128,4><<<(s_len + tile_items - 1)/tile_items, 128>>>(s_region, s_suppkey, s_len, ht_s, s_len);
   /*CHECK_ERROR();*/
 
   build_hashtable_p<128,4><<<(p_len + tile_items - 1)/tile_items, 128>>>(p_partkey, p_brand1, p_len, ht_p, p_len);
   /*CHECK_ERROR();*/
 
-  int d_val_min = 19920101;
   build_hashtable_d<128,4><<<(d_len + tile_items - 1)/tile_items, 128>>>(d_datekey, d_year, d_len, ht_d, d_val_len, d_val_min);
   /*CHECK_ERROR();*/
-
+  } else {
+    if constexpr(QImpl == QueryVariant::Compiled){
+      constexpr int batchSize{20000};
+      constexpr int numBatchesS{(S_LEN + batchSize - 1) / batchSize};
+      constexpr int numBatchesP{(P_LEN + batchSize - 1) / batchSize};
+      constexpr int numBatchesD{(D_LEN + batchSize - 1) / batchSize};
+      constexpr int numThreads{1024};
+      constexpr int elemPerThread{batchSize / numThreads + 1};
+      build_hashtable_s_Compiled<numThreads,elemPerThread><<<numBatchesS, numThreads>>>(s_region, s_suppkey, s_len, ht_s, s_len);
+      build_hashtable_p_Compiled<numThreads,elemPerThread><<<numBatchesP, numThreads>>>(p_partkey, p_brand1, p_len, ht_p, p_len);
+      build_hashtable_d_Compiled<numThreads,elemPerThread><<<numBatchesD, numThreads>>>(d_datekey, d_year, d_len, ht_d, d_val_len, d_val_min);
+    }
+  }
   int *res;
   int res_size = ((1998-1992+1) * 1000);
   int res_array_size = res_size * 4;
@@ -181,8 +326,18 @@ float runQuery(int* lo_orderdate, int* lo_partkey, int* lo_suppkey, int* lo_reve
   CubDebugExit(cudaMemset(res, 0, res_array_size * sizeof(int)));
 
   // Run
-  probe<128,4><<<(lo_len + tile_items - 1)/tile_items, 128>>>(lo_orderdate,
+  if constexpr(QImpl == QueryVariant::Vector){
+    probe<128,4><<<(lo_len + tile_items - 1)/tile_items, 128>>>(lo_orderdate,
           lo_partkey, lo_suppkey, lo_revenue, lo_len, ht_s, s_len, ht_p, p_len, ht_d, d_val_len, res);
+  } else {
+    if constexpr(QImpl == QueryVariant::Compiled){      constexpr int batchSize{20000};
+      constexpr int numBatches{(LO_LEN + batchSize - 1) / batchSize};
+      constexpr int numThreads{1024};
+      constexpr int elemPerThread{batchSize / numThreads + 1};
+      probeCompiled<numThreads,elemPerThread><<<numBatches, numThreads>>>(lo_orderdate,
+          lo_partkey, lo_suppkey, lo_revenue, lo_len, ht_s, s_len, ht_p, p_len, ht_d, d_val_len, res);
+    }
+  }
 
   cudaEventRecord(stop, 0);
   cudaEventSynchronize(stop);
@@ -267,20 +422,37 @@ int main(int argc, char** argv)
   int *d_s_suppkey = loadToGPU<int>(h_s_suppkey, S_LEN, g_allocator);
   int *d_s_region = loadToGPU<int>(h_s_region, S_LEN, g_allocator);
 
+  cout << "** VECTOR TEST **" << endl;
   for (int t = 0; t < num_trials; t++) {
     float time_query;
-    time_query = runQuery(
+    time_query = runQuery<QueryVariant::Vector>(
         d_lo_orderdate, d_lo_partkey, d_lo_suppkey, d_lo_revenue, LO_LEN,
         d_p_partkey, d_p_brand1, P_LEN,
         d_d_datekey, d_d_year, D_LEN,
         d_s_suppkey, d_s_region, S_LEN,
         g_allocator);
     cout<< "{"
-        << "\"query\":22"
+        << "\"type\":vec" 
+        << ",\"query\":22" 
         << ",\"time_query\":" << time_query
         << "}" << endl;
   }
 
+  cout << "** COMPILED TEST **" << endl;
+  for (int t = 0; t < num_trials; t++) {
+    float time_query;
+    time_query = runQuery<QueryVariant::Compiled>(
+        d_lo_orderdate, d_lo_partkey, d_lo_suppkey, d_lo_revenue, LO_LEN,
+        d_p_partkey, d_p_brand1, P_LEN,
+        d_d_datekey, d_d_year, D_LEN,
+        d_s_suppkey, d_s_region, S_LEN,
+        g_allocator);
+    cout<< "{"
+        << "\"type\":comp" 
+        << ",\"query\":22" 
+        << ",\"time_query\":" << time_query
+        << "}" << endl;
+  }
   return 0;
 }
 

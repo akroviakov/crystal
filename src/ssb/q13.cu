@@ -140,8 +140,7 @@ float runQuery(int* lo_orderdate, int* lo_discount, int* lo_quantity, int* lo_ex
     constexpr int numThreads{1024};
     constexpr int elemPerThread{batchSize / numThreads + 1};
     if constexpr(QImpl == QueryVariant::Compiled){
-      constexpr int numBlocks{numBatches};
-      TIME_FUNC((DeviceSelectIfCompiled<numThreads,elemPerThread><<<numBlocks, numThreads>>>(lo_orderdate, 
+      TIME_FUNC((DeviceSelectIfCompiled<numThreads,elemPerThread><<<numBatches, numThreads>>>(lo_orderdate, 
           lo_discount, lo_quantity, lo_extendedprice, lo_num_entries, d_sum)), time_query);
     }
   }
