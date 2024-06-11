@@ -190,9 +190,6 @@ __global__ void build_hashtable_c_Compiled(int* filter_col, int *dim_key, int* d
 
 template<int BLOCK_THREADS, int ITEMS_PER_THREAD>
 __global__ void build_hashtable_d_Compiled(int *dim_key, int *dim_val, int num_tuples, int *hash_table, int num_slots, int val_min) {
-  int items[ITEMS_PER_THREAD];
-  int items2[ITEMS_PER_THREAD];
-  int selection_flags[ITEMS_PER_THREAD];
 
   int tile_offset = blockIdx.x * TILE_SIZE;
   int num_tiles = (num_tuples + TILE_SIZE - 1) / TILE_SIZE;
