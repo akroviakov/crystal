@@ -22,6 +22,7 @@ using namespace std;
 bool                    g_verbose = false;  // Whether to display input/output to console
 cub::CachingDeviceAllocator  g_allocator(true);  // Caching allocator for device memory
 
+constexpr int batchSize{20000};
 
 template<int BLOCK_THREADS, int ITEMS_PER_THREAD>
 __global__ void QueryKernelCompiled(int* lo_orderdate, int* lo_discount, int* lo_quantity, int* lo_extendedprice,
@@ -35,7 +36,8 @@ __global__ void QueryKernelCompiled(int* lo_orderdate, int* lo_discount, int* lo
   if (blockIndex == num_tiles - 1) {
     num_tile_items = lo_num_entries - tile_offset;
   }
-
+  
+  // Crystal parallelism:
   for(int i = 0; i < ITEMS_PER_THREAD; i++){
     if(threadIdx.x + i * BLOCK_THREADS < num_tile_items){
       int offset = tile_offset + threadIdx.x + BLOCK_THREADS * i;
@@ -47,6 +49,43 @@ __global__ void QueryKernelCompiled(int* lo_orderdate, int* lo_discount, int* lo
       }
     }
   }
+  
+  /*
+    HeavyDB parallelism. https://github.com/heavyai/heavydb/blob/72c90bc290b79dd30240da41c103a00720f6b050/QueryEngine/JoinHashTable/Runtime/HashJoinRuntime.cpp#L779):
+    Typical HeavyDB loop example:
+    int32_t start = threadIdx.x + blockDim.x * blockIdx.x;
+    int32_t step = blockDim.x * gridDim.x;
+    or in their LLVM:
+    define i32 @pos_start_impl() {
+      %threadIdx = call i32 @llvm.nvvm.read.ptx.sreg.tid.x()
+      %blockIdx = call i32 @llvm.nvvm.read.ptx.sreg.ctaid.x()
+      %blockDim = call i32 @llvm.nvvm.read.ptx.sreg.ntid.x()
+      %1 = mul nsw i32 %blockIdx, %blockDim
+      %2 = add nsw i32 %threadIdx, %1
+      ret i32 %2
+    }
+
+    define i32 @pos_step_impl() {
+      %blockDim = call i32 @llvm.nvvm.read.ptx.sreg.ntid.x()
+      %gridDim = call i32 @llvm.nvvm.read.ptx.sreg.nctaid.x()
+      %1 = mul nsw i32 %blockDim, %gridDim
+      ret i32 %1
+    }
+  */
+
+  // const int step{gridDim.x * blockDim.x}; // number of threads in kernel
+  // for(int batchStart = 0; batchStart < lo_num_entries; batchStart += batchSize){
+  //   int globalThreadIdx = threadIdx.x + blockIdx.x * blockDim.x;
+  //   for(int threadOffsetInBatch = globalThreadIdx; threadOffsetInBatch < batchSize; threadOffsetInBatch += step) {
+  //     int offset = batchStart + threadOffsetInBatch;
+  //     if(offset < lo_num_entries) {
+  //         if(lo_orderdate[offset] > 19930000 && lo_orderdate[offset] < 19940000 && 
+  //             lo_quantity[offset] < 25 && lo_discount[offset] >= 1 && lo_discount[offset] <= 3) {
+  //             sum += lo_discount[offset] * lo_extendedprice[offset];
+  //         }
+  //     }
+  //   }
+  // }
   __syncthreads();
   static __shared__ long long buffer[32];
   unsigned long long aggregate = BlockSum<long long, BLOCK_THREADS, ITEMS_PER_THREAD>(sum, (long long*)buffer);
@@ -139,7 +178,6 @@ float runQuery(int* lo_orderdate, int* lo_discount, int* lo_quantity, int* lo_ex
           lo_discount, lo_quantity, lo_extendedprice, lo_num_entries, d_sum);
   } else {
     /* DATA INFO */
-    constexpr int batchSize{20000};
     constexpr int numBatches{(LO_LEN + batchSize - 1) / batchSize};
     /* END DATA INFO */
 
@@ -173,8 +211,7 @@ float runQuery(int* lo_orderdate, int* lo_discount, int* lo_quantity, int* lo_ex
     constexpr int numThreads{1024};
     constexpr int elemPerThread{batchSize / numThreads + 1};
     if constexpr(QImpl == QueryVariant::Compiled){
-    constexpr int numBlocks{numBatches};
-    QueryKernelCompiled<numThreads,elemPerThread><<<numBlocks, numThreads>>>(lo_orderdate, 
+      QueryKernelCompiled<numThreads,elemPerThread><<<numBatches, numThreads>>>(lo_orderdate, 
           lo_discount, lo_quantity, lo_extendedprice, lo_num_entries, d_sum);
     } else {
       int batchId{0};
