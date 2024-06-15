@@ -3,7 +3,6 @@
 # Example: ./run_test_selected.sh ~/somepath/resources/data/ssb_simplified/ 1 PROFILE
 DATA_DIR=$1
 SF=$2
-MODE=$3
 
 make clean
 make
@@ -45,12 +44,6 @@ for q in ${QUERIES[@]}
 do
   for bsize in ${BATCH_SIZES[@]}
   do
-    if [[ $MODE == "PROFILE" ]]; then
-      METRICS_OUTPUT_FILE=$METRICS_OUTPUT_DIR/metrics_SF_${SF}_${q}.csv
-      rm -f $METRICS_OUTPUT_FILE
-      nvprof --csv --metrics $metrics ./bin/ssb/$q --batchSize=$bsize 2>> $METRICS_OUTPUT_FILE 
-      grep -v '^==' $METRICS_OUTPUT_FILE > temp.csv && mv temp.csv $METRICS_OUTPUT_FILE
-    fi
     ./bin/ssb/$q --batchSize=$bsize >> $RAW_OUTPUT_FILE
   done
 done
@@ -72,8 +65,3 @@ done < "$RAW_OUTPUT_FILE"
 
 echo "Plotting: python3 plot_par_model_comp.py $SF $CSV_OUTPUT_FILE"
 python3 plot_par_model_comp.py $SF $CSV_OUTPUT_FILE
-
-if [[ $MODE == "PROFILE" ]]; then
-  echo "Plotting: python3 plot_metric_comp.py $SF $METRICS_OUTPUT_DIR"
-  python3 plot_metric_comp.py $SF $METRICS_OUTPUT_DIR
-fi

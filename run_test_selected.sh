@@ -4,7 +4,13 @@
 DATA_DIR=$1
 SF=$2
 MODE=$3
+BATCH_SIZE=$4
+echo "BATCHSIZE $BATCH_SIZE"
 
+if [ $# -lt 4 ]; then
+  BATCH_SIZE=20000
+fi
+echo "BATCHSIZE $BATCH_SIZE"
 make clean
 make
 
@@ -13,7 +19,7 @@ SCRIPT_DIR=$(dirname "$SCRIPT_PATH")
 
 pushd "src/ssb"
 sed -i "s/#define SF [^ ]*/#define SF $SF/g" ssb_utils.h
-files=("q11.cu" "q12.cu" "q13.cu" "q21.cu" "q22.cu" "q23.cu" "q41.cu" "q42.cu" "q43.cu")
+files=("q11.cu")
 QUERIES=()
 
 for file in "${files[@]}"
@@ -46,10 +52,10 @@ do
   if [[ $MODE == "PROFILE" ]]; then
     METRICS_OUTPUT_FILE=$METRICS_OUTPUT_DIR/metrics_SF_${SF}_${q}.csv
     rm -f $METRICS_OUTPUT_FILE
-    nvprof --csv --metrics $metrics ./bin/ssb/$q 2>> $METRICS_OUTPUT_FILE 
+    nvprof --csv --metrics $metrics ./bin/ssb/$q --batchSize=$BATCH_SIZE 2>> $METRICS_OUTPUT_FILE 
     grep -v '^==' $METRICS_OUTPUT_FILE > temp.csv && mv temp.csv $METRICS_OUTPUT_FILE
   fi
-  ./bin/ssb/$q >> $RAW_OUTPUT_FILE
+  ./bin/ssb/$q --batchSize=$BATCH_SIZE >> $RAW_OUTPUT_FILE
 done
 
 touch $RAW_OUTPUT_FILE

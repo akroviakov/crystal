@@ -65,17 +65,16 @@ __global__ void QueryKernelCompiled(int* lo_orderdate, int* lo_discount, int* lo
 
   if constexpr (ParModel == Parallelism::BatchToSM){ // Crystal parallelism
     const int threadsInBlock{blockDim.x};
-    const int numRowsPerThread{batchSize / threadsInBlock + 1};
-    int blockIndex = (batchId == -1) ? blockIdx.x : batchId + blockIdx.x;
-    int tile_offset = blockIndex * batchSize;
-    int num_tiles = (lo_num_entries + batchSize - 1) / batchSize;
-    int num_tile_items = batchSize;
-    if (blockIndex == num_tiles - 1) {
-      num_tile_items = lo_num_entries - tile_offset;
-    }
+    const int numRowsPerThread{(batchSize + threadsInBlock - 1) / threadsInBlock};
+    const int blockIndex = (batchId == -1) ? blockIdx.x : batchId + blockIdx.x;
+    const int batchOffset = blockIndex * batchSize;
+    const int numBatches = (lo_num_entries + batchSize - 1) / batchSize;
+    const int numBatchRows = (blockIndex == numBatches - 1) ? lo_num_entries - batchOffset : batchSize;
+    
+    // Variant with less throughput/transactions: loads only happen when needed
     for(int i = 0; i < numRowsPerThread; i++){
-      if(threadIdx.x + i * threadsInBlock < num_tile_items){
-        int offset = tile_offset + threadIdx.x + threadsInBlock * i;
+      if(threadIdx.x + i * threadsInBlock < numBatchRows){
+        const int offset = batchOffset + threadIdx.x + threadsInBlock * i;
         if(offset < lo_num_entries){
           if(lo_orderdate[offset] > 19930000 && lo_orderdate[offset] < 19940000 && 
               lo_quantity[offset] < 25 && lo_discount[offset] >= 1 && lo_discount[offset] <= 3){
@@ -84,6 +83,21 @@ __global__ void QueryKernelCompiled(int* lo_orderdate, int* lo_discount, int* lo
         }
       }
     }
+
+    // Variant with larger throughput: discount is loaded even when not needed.
+    // for (int i = 0; i < numRowsPerThread; i++) {
+    //   const int localIndex = threadIdx.x + i * threadsInBlock;
+    //   const int offset = batchOffset + localIndex;
+    //   if (localIndex < numBatchRows && offset < lo_num_entries) {
+    //     const int orderdate = lo_orderdate[offset];
+    //     const int quantity = lo_quantity[offset];
+    //     const int discount = lo_discount[offset];
+    //     if (orderdate > 19930000 && orderdate < 19940000 && quantity < 25 && discount >= 1 && discount <= 3) {
+    //       sum += static_cast<unsigned long long>(discount) * lo_extendedprice[offset];
+    //     }
+    //   }
+    // }
+
   } else { // Omnisci parallelism
     const int step{gridDim.x * blockDim.x}; // number of threads in kernel
     const int globalThreadIdx{threadIdx.x + blockIdx.x * blockDim.x};

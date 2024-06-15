@@ -10,13 +10,13 @@ def extract_filename(path):
     return file_name
 
 def plot_execution_times(file, SF):
-    fig, ax = plt.subplots(figsize=(11, 5))
+    fig, ax = plt.subplots(figsize=(8, 4))
     colors = ['b', 'r', 'g', 'y', 'c', 'm']
     df = pd.read_csv(file)
     df['name'] = df['name'].str[:-4]
     df_mean = df.groupby(['name', 'type'])['executionTime'].mean().unstack()
     df_normalized = df_mean.apply(lambda x: x / x.max() * 100, axis=1)
-    bar_width = 0.35
+    bar_width = 0.3
 
     indices = np.arange(len(df_normalized))
     bar1 = ax.bar(indices - bar_width/2, df_normalized['vec'], bar_width, label='Vec',zorder=2)
@@ -24,8 +24,8 @@ def plot_execution_times(file, SF):
     for i, (vec_bar, comp_bar) in enumerate(zip(bar1, bar2)):
         vec_value = df_mean['vec'].iloc[i]
         comp_value = df_mean['comp'].iloc[i]
-        ax.text(vec_bar.get_x() + vec_bar.get_width() / 2, vec_bar.get_height(), f'{vec_value:.2f}ms', ha='center', va='bottom', fontsize=9)
-        ax.text(comp_bar.get_x() + comp_bar.get_width() / 2, comp_bar.get_height(), f'{comp_value:.2f}ms', ha='center', va='bottom', fontsize=9)
+        ax.text(vec_bar.get_x() + vec_bar.get_width() / 2, vec_bar.get_height(), f'{vec_value:.2f}ms', ha='center', va='bottom', fontsize=7)
+        ax.text(comp_bar.get_x() + comp_bar.get_width() / 2, comp_bar.get_height(), f'{comp_value:.2f}ms', ha='center', va='bottom', fontsize=7)
         
     ax.set_xlabel('Query')
     ax.set_ylabel('Relative *kernel* time (%)')

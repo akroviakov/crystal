@@ -4,6 +4,7 @@ import matplotlib.pyplot as plt
 import os
 import argparse
 import glob
+import re
 
 def extract_filename(path):
     base_name = os.path.basename(path) 
@@ -23,8 +24,8 @@ def plot_metric(file, SF):
     percent_cols = pivot_df.select_dtypes(include=['object']).columns[pivot_df.select_dtypes(include=['object']).apply(lambda x: x.str.contains('GB/s')).any()]
     pivot_df[percent_cols] = pivot_df[percent_cols].replace({'GB/s': ''}, regex=True).astype(float)
     pivot_df.rename(columns=lambda x: x + ' GB/s' if x in percent_cols else x, inplace=True)
-
-    pivot_df['Kernel'] = pivot_df['Kernel'].str.extract(r'\s(\w+)<')
+    pattern = r'(\b\w+<[^>]*>)'
+    pivot_df['Kernel'] = pivot_df['Kernel'].str.extract(pattern)
 
     # melted_df = melted_df.set_index(["Kernel", "Statistic", "Metric Name"]).unstack()
     pivot_df = pivot_df[pivot_df['Statistic'] == 'Avg']
@@ -45,33 +46,46 @@ def plot_metric(file, SF):
     pivot_df = pivot_df.astype(float, errors='ignore') 
 
     kernel_pairs = []
-
+    matched = set()
     for kernel in pivot_df.index:
-        if kernel.endswith('Compiled'):
-            base_kernel = kernel.replace('Compiled', '')
-            base_kernel1 = kernel.replace('_Compiled', '')
-
-            if base_kernel in pivot_df.index:
-                kernel_pairs.append((base_kernel, kernel))
-            elif base_kernel1 in pivot_df.index:
-                kernel_pairs.append((base_kernel1, kernel))
+        offset = -1      
+        if "_Compiled" in kernel:
+            offset = kernel.find('_Compiled')
+        elif "Compiled" in kernel:
+            offset = kernel.find('Compiled')
+        if offset == -1:
+            continue
+        base_prefix = kernel[0:offset]
+        base_kernel = [s for s in pivot_df.index if s.startswith(f'{base_prefix}<')][0]
+        if base_kernel not in matched:
+            pattern = r'\b{}(?:Compiled|_Compiled)?(?:\d*)<[^>]*(?:Parallelism=0|Parallelism=1)*[^>]*>'.format(re.escape(base_prefix))
+            matches = re.findall(pattern, ', '.join(pivot_df.index))
+            matched.add(base_kernel)
+            kernel_pairs.append(matches)
 
     # Number of columns to plot
     columns_to_plot = pivot_df.columns
     # Create subplots
+    num_variants = len(kernel_pairs[0])
+    colors=['r','g','b']
     fig, axes = plt.subplots(len(kernel_pairs), len(columns_to_plot), figsize=(3 * len(columns_to_plot), 3* len(kernel_pairs)))
     bar_width = 0.1
-
-    for i, (base_kernel, compiled_kernel) in enumerate(kernel_pairs):
+    for i, tpl in enumerate(kernel_pairs):
         for j, column in enumerate(columns_to_plot):
             if len(kernel_pairs) == 1:
                 ax = axes[j]
             else:
                 ax = axes[i, j]
-            
-            ax.bar(1 - bar_width / 2, pivot_df.loc[base_kernel, column], bar_width, label=base_kernel, zorder=2, color='blue')
-            ax.bar(1 + bar_width / 2, pivot_df.loc[compiled_kernel, column], bar_width, label=compiled_kernel, zorder=2, color='orange')
+            for var_idx, variant in enumerate(tpl):
+                line_label=variant
+                if 'Parallelism=' in variant:
+                    if 'Parallelism=1' in variant:
+                        line_label = variant.replace('Parallelism=1', 'Parallelism=Omnisci') 
+                    else:
+                        line_label = variant.replace('Parallelism=0', 'Parallelism=Crystal')
+                ax.bar((bar_width * var_idx), pivot_df.loc[variant, column], bar_width, label=line_label, zorder=2, color=colors[var_idx])
             ax.set_title(column)
+            ax.grid(zorder=1)
             ax.set_xticks([])
             if j==0:
                 ax.legend(loc='center right', bbox_to_anchor=(-0.3, 0.5))
