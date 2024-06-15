@@ -1,6 +1,6 @@
 #pragma once
 
-template<typename T, int BLOCK_THREADS, int ITEMS_PER_THREAD>
+template<typename T, int BLOCK_THREADS=1, int ITEMS_PER_THREAD=1>
 __device__ __forceinline__ T BlockSum(
     T  item,
     T* shared
