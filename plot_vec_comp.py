@@ -15,6 +15,8 @@ def plot_execution_times(file, SF):
     df = pd.read_csv(file)
     df['name'] = df['name'].str[:-4]
     df_mean = df.groupby(['name', 'type'])['executionTime'].mean().unstack()
+    if 'comp_omnisci' in df_mean.columns:
+        df_mean.drop(columns=['comp_omnisci'], inplace=True)
     df_normalized = df_mean.apply(lambda x: x / x.max() * 100, axis=1)
     bar_width = 0.3
 

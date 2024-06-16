@@ -19,7 +19,7 @@ SCRIPT_DIR=$(dirname "$SCRIPT_PATH")
 
 pushd "src/ssb"
 sed -i "s/#define SF [^ ]*/#define SF $SF/g" ssb_utils.h
-files=("q11.cu")
+files=("q11.cu" "q12.cu" "q13.cu" "q21.cu" "q22.cu" "q23.cu" "q41.cu" "q42.cu" "q43.cu")
 QUERIES=()
 
 for file in "${files[@]}"
@@ -45,8 +45,12 @@ CSV_OUTPUT_FILE="$MEASUREMENTS_DIR/$REPORT.csv"
 rm -rf $RAW_OUTPUT_FILE
 rm -rf $CSV_OUTPUT_FILE
 
-metrics=inst_per_warp,l2_utilization,unique_warps_launched,achieved_occupancy,gld_throughput,gld_transactions,gst_transactions,stall_memory_dependency
-# ,dram_read_transactions,dram_write_transactions
+# gld_efficiency - coalescing
+# warp_execution_efficiency - thread divergence or the kernel was not launched with a multiple of 32 threads per block
+# sm_efficiency - Workload balance. Ratio of cycles that a SM had at least 1 active warp to the total number of cycles executed in the measurement.
+# stall_not_selected - if this number is high then part or all of the kernel has sufficient occupancy (active_warps) to hide instruction latency.
+metrics=inst_per_warp,l2_utilization,,warp_execution_efficiency,sm_efficiency,achieved_occupancy,gld_efficiency,gld_throughput,gld_transactions,stall_memory_dependency
+# ,dram_read_transactions,dram_write_transactions,gst_transactions,unique_warps_launched
 for q in ${QUERIES[@]}
 do
   if [[ $MODE == "PROFILE" ]]; then

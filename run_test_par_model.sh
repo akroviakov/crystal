@@ -37,7 +37,7 @@ CSV_OUTPUT_FILE="$MEASUREMENTS_DIR/$REPORT.csv"
 
 rm -rf $RAW_OUTPUT_FILE
 rm -rf $CSV_OUTPUT_FILE
-BATCH_SIZES=(5000 10000 20000 40000 50000 100000 200000 400000 800000 1000000 3000000 10000000)
+BATCH_SIZES=(5000 10000 20000 40000 50000 100000 200000 400000 800000 1000000 3000000 10000000 32000000)
 metrics=inst_per_warp,l2_utilization,unique_warps_launched,achieved_occupancy,gld_throughput,gld_transactions,gst_transactions,stall_memory_dependency
 # ,dram_read_transactions,dram_write_transactions
 for q in ${QUERIES[@]}

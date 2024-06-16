@@ -20,9 +20,12 @@ def plot_metric(file, SF):
     percent_cols = pivot_df.select_dtypes(include=['object']).columns[pivot_df.select_dtypes(include=['object']).apply(lambda x: x.str.contains('%')).any()]
     pivot_df[percent_cols] = pivot_df[percent_cols].replace({'%': ''}, regex=True).astype(float)
     pivot_df.rename(columns=lambda x: x + ' (%)' if x in percent_cols else x, inplace=True)
-
-    percent_cols = pivot_df.select_dtypes(include=['object']).columns[pivot_df.select_dtypes(include=['object']).apply(lambda x: x.str.contains('GB/s')).any()]
-    pivot_df[percent_cols] = pivot_df[percent_cols].replace({'GB/s': ''}, regex=True).astype(float)
+    
+    percent_cols = pivot_df.select_dtypes(include=['object']).columns[pivot_df.select_dtypes(include=['object']).apply(lambda x: x.str.contains('GB/s').any() or x.str.contains('MB/s')).any()]
+    mb_mask = pivot_df[percent_cols].apply(lambda x: x.str.contains('MB/s'))
+    pivot_df[percent_cols] = pivot_df[percent_cols].replace({'GB/s': ''}, regex=True)
+    pivot_df[percent_cols] = pivot_df[percent_cols].replace({'MB/s': ''}, regex=True).astype(float) 
+    pivot_df[percent_cols] = pivot_df[percent_cols].where(~mb_mask, pivot_df[percent_cols] / 1000)
     pivot_df.rename(columns=lambda x: x + ' GB/s' if x in percent_cols else x, inplace=True)
     pattern = r'(\b\w+<[^>]*>)'
     pivot_df['Kernel'] = pivot_df['Kernel'].str.extract(pattern)

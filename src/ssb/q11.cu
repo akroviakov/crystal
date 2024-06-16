@@ -73,13 +73,12 @@ __global__ void QueryKernelCompiled(int* lo_orderdate, int* lo_discount, int* lo
     
     // Variant with less throughput/transactions: loads only happen when needed
     for(int i = 0; i < numRowsPerThread; i++){
-      if(threadIdx.x + i * threadsInBlock < numBatchRows){
-        const int offset = batchOffset + threadIdx.x + threadsInBlock * i;
-        if(offset < lo_num_entries){
-          if(lo_orderdate[offset] > 19930000 && lo_orderdate[offset] < 19940000 && 
-              lo_quantity[offset] < 25 && lo_discount[offset] >= 1 && lo_discount[offset] <= 3){
-            sum += lo_discount[offset] * lo_extendedprice[offset];
-          }
+      const int threadOffsetWithinBlock = threadIdx.x + i * threadsInBlock;
+      if(threadOffsetWithinBlock < numBatchRows){
+        const int offset = batchOffset + threadOffsetWithinBlock;
+        if(lo_orderdate[offset] > 19930000 && lo_orderdate[offset] < 19940000 && 
+            lo_quantity[offset] < 25 && lo_discount[offset] >= 1 && lo_discount[offset] <= 3){
+          sum += lo_discount[offset] * lo_extendedprice[offset];
         }
       }
     }
@@ -106,11 +105,9 @@ __global__ void QueryKernelCompiled(int* lo_orderdate, int* lo_discount, int* lo
     for(; batchStart < limit; batchStart += batchSize){
       for(int threadOffsetInBatch = globalThreadIdx; threadOffsetInBatch < batchSize; threadOffsetInBatch += step) {
         int offset = batchStart + threadOffsetInBatch;
-        if(offset < lo_num_entries) {
-          if(lo_orderdate[offset] > 19930000 && lo_orderdate[offset] < 19940000 && 
-            lo_quantity[offset] < 25 && lo_discount[offset] >= 1 && lo_discount[offset] <= 3) {
-            sum += lo_discount[offset] * lo_extendedprice[offset];
-          }
+        if(offset < lo_num_entries && lo_orderdate[offset] > 19930000 && lo_orderdate[offset] < 19940000 && 
+          lo_quantity[offset] < 25 && lo_discount[offset] >= 1 && lo_discount[offset] <= 3) {
+          sum += lo_discount[offset] * lo_extendedprice[offset];
         }
       }
     }
@@ -254,9 +251,10 @@ float runQuery(int* lo_orderdate, int* lo_discount, int* lo_quantity, int* lo_ex
       gridSize_ = numBatches;
       blockSize_ = numThreads;
     }
+    // std::cout << "< " << gridSize_ << ","<< blockSize_ << ">" << "\n";
     // Round up according to array size 
     if constexpr(QImpl == QueryVariant::Compiled){
-      QueryKernelCompiled<ParModel><<<numBatches, numThreads>>>(lo_orderdate, 
+      QueryKernelCompiled<ParModel><<<gridSize_, blockSize_>>>(lo_orderdate, 
           lo_discount, lo_quantity, lo_extendedprice, lo_num_entries, d_sum, batchSize);
     } else {
       int batchId{0};
