@@ -26,9 +26,16 @@ int batchSize{20000};
 
 enum QueryVariant {
   Vector = 0,
-  Compiled = 1,
-  Compiled_Multi = 2
+  Vector_opt = 1,
+  Compiled = 2,
+  Compiled_Multi = 3
 };
+
+enum Prefetch {
+  Disable = 0,
+  Enable = 1
+};
+
 
 enum Parallelism {
   BatchToSM = 0,
@@ -57,8 +64,16 @@ enum Parallelism {
   }
 */
 
-template<Parallelism ParModel>
-__global__ void QueryKernelCompiled(int* lo_orderdate, int* lo_discount, int* lo_quantity, int* lo_extendedprice,
+__device__ __forceinline__ int getSMemIndex(int threadId, int pdist, int numColumns, int columnId, int offset) {
+    int baseIndex = threadId * pdist * numColumns;
+    int columnBaseIndex = columnId * pdist;
+    int smemIndex = baseIndex + columnBaseIndex + offset;
+    return smemIndex;
+}
+
+
+template<Parallelism ParModel, Prefetch ShouldPrefetch=Prefetch::Disable>
+__global__ void QueryKernelCompiled(const int* lo_orderdate, const int* lo_discount, const int* lo_quantity, const int* lo_extendedprice,
     int lo_num_entries, unsigned long long* revenue, const int batchSize, int batchId = -1, int numBatches = 1) {
 
   long long sum = 0;
@@ -72,30 +87,53 @@ __global__ void QueryKernelCompiled(int* lo_orderdate, int* lo_discount, int* lo
     const int numBatchRows = (blockIndex == numBatches - 1) ? lo_num_entries - batchOffset : batchSize;
     
     // Variant with less throughput/transactions: loads only happen when needed
-    for(int i = 0; i < numRowsPerThread; i++){
-      const int threadOffsetWithinBlock = threadIdx.x + i * threadsInBlock;
-      if(threadOffsetWithinBlock < numBatchRows){
-        const int offset = batchOffset + threadOffsetWithinBlock;
-        if(lo_orderdate[offset] > 19930000 && lo_orderdate[offset] < 19940000 && 
-            lo_quantity[offset] < 25 && lo_discount[offset] >= 1 && lo_discount[offset] <= 3){
-          sum += lo_discount[offset] * lo_extendedprice[offset];
+    if constexpr(ShouldPrefetch == Prefetch::Disable){
+      for(int i = 0; i < numRowsPerThread; i++){
+        const int threadOffsetWithinBlock = threadIdx.x + i * threadsInBlock;
+        if(threadOffsetWithinBlock < numBatchRows){
+          const int offset = batchOffset + threadOffsetWithinBlock;
+          int orderdate = lo_orderdate[offset];
+          if(orderdate > 19930000 && orderdate < 19940000){
+            int quantity = lo_quantity[offset];
+            if(quantity < 25){
+              int discount = lo_discount[offset];
+              if(discount >= 1 && discount <= 3){
+                sum += discount * lo_extendedprice[offset];
+              }
+            }
+          }
         }
       }
     }
-
-    // Variant with larger throughput: discount is loaded even when not needed.
-    // for (int i = 0; i < numRowsPerThread; i++) {
-    //   const int localIndex = threadIdx.x + i * threadsInBlock;
-    //   const int offset = batchOffset + localIndex;
-    //   if (localIndex < numBatchRows && offset < lo_num_entries) {
-    //     const int orderdate = lo_orderdate[offset];
-    //     const int quantity = lo_quantity[offset];
-    //     const int discount = lo_discount[offset];
-    //     if (orderdate > 19930000 && orderdate < 19940000 && quantity < 25 && discount >= 1 && discount <= 3) {
-    //       sum += static_cast<unsigned long long>(discount) * lo_extendedprice[offset];
-    //     }
-    //   }
-    // }
+    if constexpr(ShouldPrefetch == Prefetch::Enable){
+      constexpr int numCols{1};
+      constexpr int PDIST{10};
+      __shared__ int orderDate[numCols * PDIST* 1024];
+      int k{0};
+      for (k=0; k<PDIST; ++k) { 
+        orderDate[getSMemIndex(threadIdx.x, PDIST, numCols, 0, k)] = noncached_read(&lo_orderdate[batchOffset + threadIdx.x + k * threadsInBlock]);
+        // orderDate[getSMemIndex(threadIdx.x, PDIST, numCols, 1, k)] = noncached_read(&lo_quantity[batchOffset + threadIdx.x + k * threadsInBlock]);
+      }
+      for (int i = 0; i < numRowsPerThread; i++, k++) {
+        int ctr_mod= i%PDIST;
+        int orderdate = orderDate[getSMemIndex(threadIdx.x, PDIST, numCols, 0, ctr_mod)];
+        // int quantity = orderDate[getSMemIndex(threadIdx.x, PDIST, numCols, 1, ctr_mod)];
+        if(k < numRowsPerThread){
+          orderDate[getSMemIndex(threadIdx.x, PDIST, numCols, 0, ctr_mod)] = noncached_read(&lo_orderdate[batchOffset + threadIdx.x + k * threadsInBlock]);
+          // orderDate[getSMemIndex(threadIdx.x, PDIST, numCols, 1, ctr_mod)] = noncached_read(&lo_quantity[batchOffset + threadIdx.x + k * threadsInBlock]);
+        }
+        const int localIndex = threadIdx.x + i * threadsInBlock;
+        if(localIndex < numBatchRows){
+          int offset = batchOffset + localIndex;
+          if (orderdate > 19930000 && orderdate < 19940000){
+            const int discount = noncached_read(&lo_discount[offset]);
+            if (noncached_read(&lo_quantity[offset]) < 25 && discount >= 1 && discount <= 3) {
+              sum += static_cast<unsigned long long>(discount) * noncached_read(&lo_extendedprice[offset]);
+            }
+          }
+        }
+      }
+    }
 
   } else { // Omnisci parallelism
     const int step{gridDim.x * blockDim.x}; // number of threads in kernel
@@ -121,7 +159,7 @@ __global__ void QueryKernelCompiled(int* lo_orderdate, int* lo_discount, int* lo
   }
 }
 
-template<int BLOCK_THREADS, int ITEMS_PER_THREAD>
+template<int BLOCK_THREADS, int ITEMS_PER_THREAD, QueryVariant Impl>
 __global__ void QueryKernel(int* lo_orderdate, int* lo_discount, int* lo_quantity, int* lo_extendedprice,
     int lo_num_entries, unsigned long long* revenue) {
   // Load a segment of consecutive items that are blocked across threads
@@ -138,20 +176,33 @@ __global__ void QueryKernel(int* lo_orderdate, int* lo_discount, int* lo_quantit
   if (blockIdx.x == num_tiles - 1) {
     num_tile_items = lo_num_entries - tile_offset;
   }
+  if constexpr(Impl == QueryVariant::Vector){
+    BlockLoad<int, BLOCK_THREADS, ITEMS_PER_THREAD>(lo_orderdate + tile_offset, items, num_tile_items);
+    BlockPredGT<int, BLOCK_THREADS, ITEMS_PER_THREAD>(items, 19930000, selection_flags, num_tile_items);
+    BlockPredAndLT<int, BLOCK_THREADS, ITEMS_PER_THREAD>(items, 19940000, selection_flags, num_tile_items);
 
-  BlockLoad<int, BLOCK_THREADS, ITEMS_PER_THREAD>(lo_orderdate + tile_offset, items, num_tile_items);
-  BlockPredGT<int, BLOCK_THREADS, ITEMS_PER_THREAD>(items, 19930000, selection_flags, num_tile_items);
-  BlockPredAndLT<int, BLOCK_THREADS, ITEMS_PER_THREAD>(items, 19940000, selection_flags, num_tile_items);
+    BlockLoad<int, BLOCK_THREADS, ITEMS_PER_THREAD>(lo_quantity + tile_offset, items, num_tile_items);
+    BlockPredAndLT<int, BLOCK_THREADS, ITEMS_PER_THREAD>(items, 25, selection_flags, num_tile_items);
 
-  BlockLoad<int, BLOCK_THREADS, ITEMS_PER_THREAD>(lo_quantity + tile_offset, items, num_tile_items);
-  BlockPredAndLT<int, BLOCK_THREADS, ITEMS_PER_THREAD>(items, 25, selection_flags, num_tile_items);
+    BlockLoad<int, BLOCK_THREADS, ITEMS_PER_THREAD>(lo_discount + tile_offset, items, num_tile_items);
+    BlockPredAndGTE<int, BLOCK_THREADS, ITEMS_PER_THREAD>(items, 1, selection_flags, num_tile_items);
+    BlockPredAndLTE<int, BLOCK_THREADS, ITEMS_PER_THREAD>(items, 3, selection_flags, num_tile_items);
 
-  BlockLoad<int, BLOCK_THREADS, ITEMS_PER_THREAD>(lo_discount + tile_offset, items, num_tile_items);
-  BlockPredAndGTE<int, BLOCK_THREADS, ITEMS_PER_THREAD>(items, 1, selection_flags, num_tile_items);
-  BlockPredAndLTE<int, BLOCK_THREADS, ITEMS_PER_THREAD>(items, 3, selection_flags, num_tile_items);
+    BlockLoad<int, BLOCK_THREADS, ITEMS_PER_THREAD>(lo_extendedprice + tile_offset, items2, num_tile_items);
+  } else {
+    BlockLoad<int, BLOCK_THREADS, ITEMS_PER_THREAD>(lo_orderdate + tile_offset,items, num_tile_items);
+    BlockPredGT<int, BLOCK_THREADS, ITEMS_PER_THREAD>(items, 19930000, selection_flags, num_tile_items);
+    BlockPredAndLT<int, BLOCK_THREADS, ITEMS_PER_THREAD>(items, 19940000, selection_flags, num_tile_items);
 
-  BlockLoad<int, BLOCK_THREADS, ITEMS_PER_THREAD>(lo_extendedprice + tile_offset, items2, num_tile_items);
+    BlockPredLoad<int, BLOCK_THREADS, ITEMS_PER_THREAD>(lo_quantity + tile_offset, items, num_tile_items, selection_flags);
+    BlockPredAndLT<int, BLOCK_THREADS, ITEMS_PER_THREAD>(items, 25, selection_flags, num_tile_items);
 
+    BlockPredLoad<int, BLOCK_THREADS, ITEMS_PER_THREAD>(lo_discount + tile_offset, items, num_tile_items, selection_flags);
+    BlockPredAndGTE<int, BLOCK_THREADS, ITEMS_PER_THREAD>(items, 1, selection_flags, num_tile_items);
+    BlockPredAndLTE<int, BLOCK_THREADS, ITEMS_PER_THREAD>(items, 3, selection_flags, num_tile_items);
+
+    BlockPredLoad<int, BLOCK_THREADS, ITEMS_PER_THREAD>(lo_extendedprice + tile_offset, items2, num_tile_items, selection_flags);
+  }
   #pragma unroll
   for (int ITEM = 0; ITEM < ITEMS_PER_THREAD; ++ITEM)
   {
@@ -202,12 +253,12 @@ float runQuery(int* lo_orderdate, int* lo_discount, int* lo_quantity, int* lo_ex
 
   // Run
 
-  if constexpr(QImpl == QueryVariant::Vector){
+  if constexpr(QImpl == QueryVariant::Vector || QImpl == QueryVariant::Vector_opt){
     constexpr int numThreads{128};
     constexpr int elemPerThread = 4;
     constexpr int tile_items = numThreads*elemPerThread;
     constexpr int numBlocks = (LO_LEN + tile_items - 1)/tile_items;
-    QueryKernel<numThreads,elemPerThread><<<numBlocks, numThreads>>>(lo_orderdate, 
+    QueryKernel<numThreads,elemPerThread, QImpl><<<numBlocks, numThreads>>>(lo_orderdate, 
           lo_discount, lo_quantity, lo_extendedprice, lo_num_entries, d_sum);
   } else {
     /* DATA INFO */
@@ -254,6 +305,9 @@ float runQuery(int* lo_orderdate, int* lo_discount, int* lo_quantity, int* lo_ex
     // std::cout << "< " << gridSize_ << ","<< blockSize_ << ">" << "\n";
     // Round up according to array size 
     if constexpr(QImpl == QueryVariant::Compiled){
+      if(ParModel == Parallelism::BatchToGPU){
+        batchSize = 32'000'000;
+      }
       QueryKernelCompiled<ParModel><<<gridSize_, blockSize_>>>(lo_orderdate, 
           lo_discount, lo_quantity, lo_extendedprice, lo_num_entries, d_sum, batchSize);
     } else {
@@ -293,12 +347,13 @@ float runQuery(int* lo_orderdate, int* lo_discount, int* lo_quantity, int* lo_ex
  */
 int main(int argc, char** argv)
 {
-  int num_trials          = 3;
-
+  int num_trials          = 10;
   // Initialize command line
   CommandLineArgs args(argc, argv);
   args.GetCmdLineArgument("t", num_trials);
   args.GetCmdLineArgument("batchSize", batchSize);
+  string dataSetPath;
+  args.GetCmdLineArgument("dataSetPath", dataSetPath);
 
   // Print usage
   if (args.CheckCmdLineFlag("help"))
@@ -312,13 +367,12 @@ int main(int argc, char** argv)
 
   // Initialize device
   CubDebugExit(args.DeviceInit());
-
-  int *h_lo_orderdate = loadColumn<int>("lo_orderdate", LO_LEN);
-  int *h_lo_discount = loadColumn<int>("lo_discount", LO_LEN);
-  int *h_lo_quantity = loadColumn<int>("lo_quantity", LO_LEN);
-  int *h_lo_extendedprice = loadColumn<int>("lo_extendedprice", LO_LEN);
-  int *h_d_datekey = loadColumn<int>("d_datekey", D_LEN);
-  int *h_d_year = loadColumn<int>("d_year", D_LEN);
+  int *h_lo_orderdate = loadColumn<int>(dataSetPath, "lo_orderdate", LO_LEN);
+  int *h_lo_discount = loadColumn<int>(dataSetPath,"lo_discount", LO_LEN);
+  int *h_lo_quantity = loadColumn<int>(dataSetPath,"lo_quantity", LO_LEN);
+  int *h_lo_extendedprice = loadColumn<int>(dataSetPath,"lo_extendedprice", LO_LEN);
+  int *h_d_datekey = loadColumn<int>(dataSetPath, "d_datekey", D_LEN);
+  int *h_d_year = loadColumn<int>(dataSetPath, "d_year", D_LEN);
 
   cout << "** LOADED DATA **" << endl;
   cout << "LO_LEN " << LO_LEN << endl;
@@ -362,6 +416,17 @@ int main(int argc, char** argv)
     time_query = runQuery<QueryVariant::Vector>(d_lo_orderdate, d_lo_discount, d_lo_quantity, d_lo_extendedprice, LO_LEN, g_allocator);
     cout<< "{"
         << "\"type\":vec" 
+        << ",\"query\":11" 
+        << ",\"time_query\":" << time_query
+        << ",\"batch_size\":" << batchSize
+        << "}" << endl;
+  }
+  cout << "** VECTOR-OPT TEST **" << endl;
+  for (int t = 0; t < num_trials; t++) {
+    float time_query;
+    time_query = runQuery<QueryVariant::Vector_opt>(d_lo_orderdate, d_lo_discount, d_lo_quantity, d_lo_extendedprice, LO_LEN, g_allocator);
+    cout<< "{"
+        << "\"type\":vecOpt" 
         << ",\"query\":11" 
         << ",\"time_query\":" << time_query
         << ",\"batch_size\":" << batchSize

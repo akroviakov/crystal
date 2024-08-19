@@ -22,6 +22,12 @@ using namespace std;
 bool                    g_verbose = false;  // Whether to display input/output to console
 cub::CachingDeviceAllocator  g_allocator(true);  // Caching allocator for device memory
 
+enum QueryVariant {
+    Vector = 0,
+    Vector_opt = 1,
+    Compiled = 2
+};
+
 template<int BLOCK_THREADS, int ITEMS_PER_THREAD>
 __global__ void probeCompiled(int* lo_orderdate, int* lo_partkey, int* lo_custkey, int* lo_suppkey, int* lo_revenue, int* lo_supplycost, int lo_len,
     int* ht_p, int p_len,
@@ -68,7 +74,7 @@ __global__ void probeCompiled(int* lo_orderdate, int* lo_partkey, int* lo_custke
   }
 }
 
-template<int BLOCK_THREADS, int ITEMS_PER_THREAD>
+template<int BLOCK_THREADS, int ITEMS_PER_THREAD, QueryVariant QImpl>
 __global__ void probe(int* lo_orderdate, int* lo_partkey, int* lo_custkey, int* lo_suppkey, int* lo_revenue, int* lo_supplycost, int lo_len,
     int* ht_p, int p_len,
     int* ht_s, int s_len,
@@ -91,24 +97,54 @@ __global__ void probe(int* lo_orderdate, int* lo_partkey, int* lo_custkey, int* 
   }
 
   InitFlags<BLOCK_THREADS, ITEMS_PER_THREAD>(selection_flags);
+  if constexpr (QImpl == QueryVariant::Vector){
+    BlockLoad<int, BLOCK_THREADS, ITEMS_PER_THREAD>(lo_suppkey + tile_offset, items, num_tile_items);
+    BlockProbeAndPHT_2<int, int, BLOCK_THREADS, ITEMS_PER_THREAD>(items, s_city, selection_flags,
+        ht_s, s_len, num_tile_items);
 
-  BlockLoad<int, BLOCK_THREADS, ITEMS_PER_THREAD>(lo_suppkey + tile_offset, items, num_tile_items);
-  BlockProbeAndPHT_2<int, int, BLOCK_THREADS, ITEMS_PER_THREAD>(items, s_city, selection_flags,
-      ht_s, s_len, num_tile_items);
+    BlockLoad<int, BLOCK_THREADS, ITEMS_PER_THREAD>(lo_custkey + tile_offset, items, num_tile_items);
+    BlockProbeAndPHT_1<int, BLOCK_THREADS, ITEMS_PER_THREAD>(items, selection_flags, ht_c, c_len, num_tile_items);
 
-  BlockLoad<int, BLOCK_THREADS, ITEMS_PER_THREAD>(lo_custkey + tile_offset, items, num_tile_items);
-  BlockProbeAndPHT_1<int, BLOCK_THREADS, ITEMS_PER_THREAD>(items, selection_flags, ht_c, c_len, num_tile_items);
+    BlockLoad<int, BLOCK_THREADS, ITEMS_PER_THREAD>(lo_partkey + tile_offset, items, num_tile_items);
+    BlockProbeAndPHT_2<int, int, BLOCK_THREADS, ITEMS_PER_THREAD>(items, brand, selection_flags,
+        ht_p, p_len, num_tile_items);
 
-  BlockLoad<int, BLOCK_THREADS, ITEMS_PER_THREAD>(lo_partkey + tile_offset, items, num_tile_items);
-  BlockProbeAndPHT_2<int, int, BLOCK_THREADS, ITEMS_PER_THREAD>(items, brand, selection_flags,
-      ht_p, p_len, num_tile_items);
+    BlockLoad<int, BLOCK_THREADS, ITEMS_PER_THREAD>(lo_orderdate + tile_offset, items, num_tile_items);
+    BlockProbeAndPHT_2<int, int, BLOCK_THREADS, ITEMS_PER_THREAD>(items, year, selection_flags,
+        ht_d, d_len, 19920101, num_tile_items);
 
-  BlockLoad<int, BLOCK_THREADS, ITEMS_PER_THREAD>(lo_orderdate + tile_offset, items, num_tile_items);
-  BlockProbeAndPHT_2<int, int, BLOCK_THREADS, ITEMS_PER_THREAD>(items, year, selection_flags,
-      ht_d, d_len, 19920101, num_tile_items);
+    BlockLoad<int, BLOCK_THREADS, ITEMS_PER_THREAD>(lo_revenue + tile_offset, revenue, num_tile_items);
+    BlockLoad<int, BLOCK_THREADS, ITEMS_PER_THREAD>(lo_supplycost + tile_offset, items, num_tile_items);
+  } else {
+    BlockLoad<int, BLOCK_THREADS, ITEMS_PER_THREAD>(lo_suppkey + tile_offset,
+                                                    items, num_tile_items);
+    BlockProbeAndPHT_2<int, int, BLOCK_THREADS, ITEMS_PER_THREAD>(
+        items, s_city, selection_flags, ht_s, s_len, num_tile_items);
+    if (IsTerm<int, BLOCK_THREADS, ITEMS_PER_THREAD>(selection_flags)) { return; }
 
-  BlockLoad<int, BLOCK_THREADS, ITEMS_PER_THREAD>(lo_revenue + tile_offset, revenue, num_tile_items);
-  BlockLoad<int, BLOCK_THREADS, ITEMS_PER_THREAD>(lo_supplycost + tile_offset, items, num_tile_items);
+    BlockPredLoad<int, BLOCK_THREADS, ITEMS_PER_THREAD>(
+        lo_custkey + tile_offset, items, num_tile_items, selection_flags);
+    BlockProbeAndPHT_1<int, BLOCK_THREADS, ITEMS_PER_THREAD>(
+        items, selection_flags, ht_c, c_len, num_tile_items);
+    if (IsTerm<int, BLOCK_THREADS, ITEMS_PER_THREAD>(selection_flags)) { return; }
+
+    BlockPredLoad<int, BLOCK_THREADS, ITEMS_PER_THREAD>(
+        lo_partkey + tile_offset, items, num_tile_items, selection_flags);
+    BlockProbeAndPHT_2<int, int, BLOCK_THREADS, ITEMS_PER_THREAD>(
+        items, brand, selection_flags, ht_p, p_len, num_tile_items);
+    if (IsTerm<int, BLOCK_THREADS, ITEMS_PER_THREAD>(selection_flags)) { return; }
+
+    BlockPredLoad<int, BLOCK_THREADS, ITEMS_PER_THREAD>(
+        lo_orderdate + tile_offset, items, num_tile_items, selection_flags);
+    BlockProbeAndPHT_2<int, int, BLOCK_THREADS, ITEMS_PER_THREAD>(
+        items, year, selection_flags, ht_d, d_len, 19920101, num_tile_items);
+    if (IsTerm<int, BLOCK_THREADS, ITEMS_PER_THREAD>(selection_flags)) { return; }
+
+    BlockPredLoad<int, BLOCK_THREADS, ITEMS_PER_THREAD>(
+        lo_revenue + tile_offset, revenue, num_tile_items, selection_flags);
+    BlockPredLoad<int, BLOCK_THREADS, ITEMS_PER_THREAD>(
+        lo_supplycost + tile_offset, items, num_tile_items, selection_flags);
+  }
 
   #pragma unroll
   for (int ITEM = 0; ITEM < ITEMS_PER_THREAD; ++ITEM) {
@@ -309,12 +345,6 @@ void build_hashtable_d(int *dim_key, int *dim_val, int num_tuples, int *hash_tab
       hash_table, num_slots, val_min, num_tile_items);
 }
 
-enum QueryVariant {
-    Vector = 0,
-    Compiled = 1,
-    Compiled_Multi = 2
-};
-
 template<QueryVariant QImpl>
 float runQuery(int* lo_orderdate, int* lo_custkey, int* lo_partkey, int* lo_suppkey, int* lo_revenue, int* lo_supplycost, int lo_len,
     int *d_datekey, int* d_year, int d_len,
@@ -347,7 +377,7 @@ float runQuery(int* lo_orderdate, int* lo_custkey, int* lo_partkey, int* lo_supp
 
   int tile_items = 128*4;
   int d_val_min = 19920101;
-  if constexpr(QImpl == QueryVariant::Vector){
+  if constexpr(QImpl == QueryVariant::Vector || QImpl == QueryVariant::Vector_opt){
     build_hashtable_s<128,4><<<(s_len + tile_items - 1)/tile_items, 128>>>(s_nation, s_suppkey, s_city, s_len, ht_s, s_len);
     /*CHECK_ERROR();*/
 
@@ -387,8 +417,8 @@ float runQuery(int* lo_orderdate, int* lo_custkey, int* lo_partkey, int* lo_supp
   CubDebugExit(cudaMemset(res, 0, res_array_size * sizeof(int)));
 
   // Run
-  if constexpr(QImpl == QueryVariant::Vector){
-  probe<128,4><<<(lo_len + tile_items - 1)/tile_items, 128>>>(lo_orderdate, lo_partkey,
+  if constexpr(QImpl == QueryVariant::Vector || QImpl == QueryVariant::Vector_opt){
+    probe<128,4,QImpl><<<(lo_len + tile_items - 1)/tile_items, 128>>>(lo_orderdate, lo_partkey,
           lo_custkey, lo_suppkey, lo_revenue, lo_supplycost, lo_len, ht_p, p_len, ht_s, s_len, ht_c, c_len, ht_d, d_val_len, res);
   } else {
     if constexpr(QImpl == QueryVariant::Compiled){
@@ -437,11 +467,13 @@ float runQuery(int* lo_orderdate, int* lo_custkey, int* lo_partkey, int* lo_supp
  */
 int main(int argc, char** argv)
 {
-  int num_trials          = 3;
+  int num_trials          = 10;
 
   // Initialize command line
   CommandLineArgs args(argc, argv);
   args.GetCmdLineArgument("t", num_trials);
+  string dataSetPath;
+  args.GetCmdLineArgument("dataSetPath", dataSetPath);
 
   // Print usage
   if (args.CheckCmdLineFlag("help"))
@@ -456,26 +488,26 @@ int main(int argc, char** argv)
   // Initialize device
   CubDebugExit(args.DeviceInit());
 
-  int *h_lo_orderdate = loadColumn<int>("lo_orderdate", LO_LEN);
-  int *h_lo_suppkey = loadColumn<int>("lo_suppkey", LO_LEN);
-  int *h_lo_custkey = loadColumn<int>("lo_custkey", LO_LEN);
-  int *h_lo_partkey = loadColumn<int>("lo_partkey", LO_LEN);
-  int *h_lo_revenue = loadColumn<int>("lo_revenue", LO_LEN);
-  int *h_lo_supplycost = loadColumn<int>("lo_supplycost", LO_LEN);
+  int *h_lo_orderdate = loadColumn<int>(dataSetPath,"lo_orderdate", LO_LEN);
+  int *h_lo_suppkey = loadColumn<int>(dataSetPath,"lo_suppkey", LO_LEN);
+  int *h_lo_custkey = loadColumn<int>(dataSetPath,"lo_custkey", LO_LEN);
+  int *h_lo_partkey = loadColumn<int>(dataSetPath,"lo_partkey", LO_LEN);
+  int *h_lo_revenue = loadColumn<int>(dataSetPath,"lo_revenue", LO_LEN);
+  int *h_lo_supplycost = loadColumn<int>(dataSetPath,"lo_supplycost", LO_LEN);
 
-  int *h_d_datekey = loadColumn<int>("d_datekey", D_LEN);
-  int *h_d_year = loadColumn<int>("d_year", D_LEN);
+  int *h_d_datekey = loadColumn<int>(dataSetPath,"d_datekey", D_LEN);
+  int *h_d_year = loadColumn<int>(dataSetPath,"d_year", D_LEN);
 
-  int *h_s_suppkey = loadColumn<int>("s_suppkey", S_LEN);
-  int *h_s_nation = loadColumn<int>("s_nation", S_LEN);
-  int *h_s_city = loadColumn<int>("s_city", S_LEN);
+  int *h_s_suppkey = loadColumn<int>(dataSetPath,"s_suppkey", S_LEN);
+  int *h_s_nation = loadColumn<int>(dataSetPath,"s_nation", S_LEN);
+  int *h_s_city = loadColumn<int>(dataSetPath,"s_city", S_LEN);
 
-  int *h_p_partkey = loadColumn<int>("p_partkey", P_LEN);
-  int *h_p_category = loadColumn<int>("p_category", P_LEN);
-  int *h_p_brand1 = loadColumn<int>("p_brand1", P_LEN);
+  int *h_p_partkey = loadColumn<int>(dataSetPath,"p_partkey", P_LEN);
+  int *h_p_category = loadColumn<int>(dataSetPath,"p_category", P_LEN);
+  int *h_p_brand1 = loadColumn<int>(dataSetPath,"p_brand1", P_LEN);
 
-  int *h_c_custkey = loadColumn<int>("c_custkey", C_LEN);
-  int *h_c_region = loadColumn<int>("c_region", C_LEN);
+  int *h_c_custkey = loadColumn<int>(dataSetPath,"c_custkey", C_LEN);
+  int *h_c_region = loadColumn<int>(dataSetPath,"c_region", C_LEN);
 
   cout << "** LOADED DATA **" << endl;
 
@@ -513,6 +545,22 @@ int main(int argc, char** argv)
         g_allocator);
     cout<< "{"
         << "\"type\":vec" 
+        << ",\"query\":43" 
+        << ",\"time_query\":" << time_query
+        << "}" << endl;
+  }
+  cout << "** VECTOR-OPT TEST **" << endl;
+  for (int t = 0; t < num_trials; t++) {
+    float time_query;
+    time_query = runQuery<QueryVariant::Vector>(
+        d_lo_orderdate, d_lo_custkey, d_lo_partkey, d_lo_suppkey, d_lo_revenue, d_lo_supplycost, LO_LEN,
+        d_d_datekey, d_d_year, D_LEN,
+        d_p_partkey, d_p_category, d_p_brand1, P_LEN,
+        d_s_suppkey, d_s_nation, d_s_city, S_LEN,
+        d_c_custkey, d_c_region, C_LEN,
+        g_allocator);
+    cout<< "{"
+        << "\"type\":vecOpt" 
         << ",\"query\":43" 
         << ",\"time_query\":" << time_query
         << "}" << endl;

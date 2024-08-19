@@ -46,19 +46,41 @@ __global__ void probe(int* lo_orderdate, int* lo_custkey, int* lo_suppkey, int* 
 
   InitFlags<BLOCK_THREADS, ITEMS_PER_THREAD>(selection_flags);
 
-  BlockLoad<int, BLOCK_THREADS, ITEMS_PER_THREAD>(lo_suppkey + tile_offset, items, num_tile_items);
-  BlockProbeAndPHT_2<int, int, BLOCK_THREADS, ITEMS_PER_THREAD>(items, s_nation, selection_flags,
-      ht_s, s_len, num_tile_items);
+  // BlockLoad<int, BLOCK_THREADS, ITEMS_PER_THREAD>(lo_suppkey + tile_offset, items, num_tile_items);
+  // BlockProbeAndPHT_2<int, int, BLOCK_THREADS, ITEMS_PER_THREAD>(items, s_nation, selection_flags,
+  //     ht_s, s_len, num_tile_items);
 
-  BlockLoad<int, BLOCK_THREADS, ITEMS_PER_THREAD>(lo_custkey + tile_offset, items, num_tile_items);
-  BlockProbeAndPHT_2<int, int, BLOCK_THREADS, ITEMS_PER_THREAD>(items, c_nation, selection_flags,
-      ht_c, c_len, num_tile_items);
+  // BlockLoad<int, BLOCK_THREADS, ITEMS_PER_THREAD>(lo_custkey + tile_offset, items, num_tile_items);
+  // BlockProbeAndPHT_2<int, int, BLOCK_THREADS, ITEMS_PER_THREAD>(items, c_nation, selection_flags,
+  //     ht_c, c_len, num_tile_items);
 
-  BlockLoad<int, BLOCK_THREADS, ITEMS_PER_THREAD>(lo_orderdate + tile_offset, items, num_tile_items);
-  BlockProbeAndPHT_2<int, int, BLOCK_THREADS, ITEMS_PER_THREAD>(items, year, selection_flags,
-      ht_d, d_len, 19920101, num_tile_items);
+  // BlockLoad<int, BLOCK_THREADS, ITEMS_PER_THREAD>(lo_orderdate + tile_offset, items, num_tile_items);
+  // BlockProbeAndPHT_2<int, int, BLOCK_THREADS, ITEMS_PER_THREAD>(items, year, selection_flags,
+  //     ht_d, d_len, 19920101, num_tile_items);
 
-  BlockLoad<int, BLOCK_THREADS, ITEMS_PER_THREAD>(lo_revenue + tile_offset, revenue, num_tile_items);
+  // BlockLoad<int, BLOCK_THREADS, ITEMS_PER_THREAD>(lo_revenue + tile_offset, revenue, num_tile_items);
+
+
+  BlockLoad<int, BLOCK_THREADS, ITEMS_PER_THREAD>(lo_suppkey + tile_offset,
+                                                  items, num_tile_items);
+  BlockProbeAndPHT_2<int, int, BLOCK_THREADS, ITEMS_PER_THREAD>(
+      items, s_nation, selection_flags, ht_s, s_len, num_tile_items);
+  if (IsTerm<int, BLOCK_THREADS, ITEMS_PER_THREAD>(selection_flags)) { return; }
+
+  BlockPredLoad<int, BLOCK_THREADS, ITEMS_PER_THREAD>(
+      lo_custkey + tile_offset, items, num_tile_items, selection_flags);
+  BlockProbeAndPHT_2<int, int, BLOCK_THREADS, ITEMS_PER_THREAD>(
+      items, c_nation, selection_flags, ht_c, c_len, num_tile_items);
+  if (IsTerm<int, BLOCK_THREADS, ITEMS_PER_THREAD>(selection_flags)) { return; }
+
+  BlockPredLoad<int, BLOCK_THREADS, ITEMS_PER_THREAD>(
+      lo_orderdate + tile_offset, items, num_tile_items, selection_flags);
+  BlockProbeAndPHT_2<int, int, BLOCK_THREADS, ITEMS_PER_THREAD>(
+      items, year, selection_flags, ht_d, d_len, 19920101, num_tile_items);
+  if (IsTerm<int, BLOCK_THREADS, ITEMS_PER_THREAD>(selection_flags)) { return; }
+
+  BlockPredLoad<int, BLOCK_THREADS, ITEMS_PER_THREAD>(
+      lo_revenue + tile_offset, revenue, num_tile_items, selection_flags);
 
   #pragma unroll
   for (int ITEM = 0; ITEM < ITEMS_PER_THREAD; ++ITEM) {
@@ -221,6 +243,8 @@ int main(int argc, char** argv)
   // Initialize command line
   CommandLineArgs args(argc, argv);
   args.GetCmdLineArgument("t", num_trials);
+  string dataSetPath;
+  args.GetCmdLineArgument("dataSetPath", dataSetPath);
 
   // Print usage
   if (args.CheckCmdLineFlag("help"))
@@ -235,21 +259,21 @@ int main(int argc, char** argv)
   // Initialize device
   CubDebugExit(args.DeviceInit());
 
-  int *h_lo_orderdate = loadColumn<int>("lo_orderdate", LO_LEN);
-  int *h_lo_custkey = loadColumn<int>("lo_custkey", LO_LEN);
-  int *h_lo_suppkey = loadColumn<int>("lo_suppkey", LO_LEN);
-  int *h_lo_revenue = loadColumn<int>("lo_revenue", LO_LEN);
+  int *h_lo_orderdate = loadColumn<int>(dataSetPath,"lo_orderdate", LO_LEN);
+  int *h_lo_custkey = loadColumn<int>(dataSetPath,"lo_custkey", LO_LEN);
+  int *h_lo_suppkey = loadColumn<int>(dataSetPath,"lo_suppkey", LO_LEN);
+  int *h_lo_revenue = loadColumn<int>(dataSetPath,"lo_revenue", LO_LEN);
 
-  int *h_d_datekey = loadColumn<int>("d_datekey", D_LEN);
-  int *h_d_year = loadColumn<int>("d_year", D_LEN);
+  int *h_d_datekey = loadColumn<int>(dataSetPath,"d_datekey", D_LEN);
+  int *h_d_year = loadColumn<int>(dataSetPath,"d_year", D_LEN);
 
-  int *h_s_suppkey = loadColumn<int>("s_suppkey", S_LEN);
-  int *h_s_nation = loadColumn<int>("s_nation", S_LEN);
-  int *h_s_city = loadColumn<int>("s_city", S_LEN);
+  int *h_s_suppkey = loadColumn<int>(dataSetPath,"s_suppkey", S_LEN);
+  int *h_s_nation = loadColumn<int>(dataSetPath,"s_nation", S_LEN);
+  int *h_s_city = loadColumn<int>(dataSetPath,"s_city", S_LEN);
 
-  int *h_c_custkey = loadColumn<int>("c_custkey", C_LEN);
-  int *h_c_nation = loadColumn<int>("c_nation", C_LEN);
-  int *h_c_city = loadColumn<int>("c_city", C_LEN);
+  int *h_c_custkey = loadColumn<int>(dataSetPath,"c_custkey", C_LEN);
+  int *h_c_nation = loadColumn<int>(dataSetPath,"c_nation", C_LEN);
+  int *h_c_city = loadColumn<int>(dataSetPath,"c_city", C_LEN);
 
   cout << "** LOADED DATA **" << endl;
 

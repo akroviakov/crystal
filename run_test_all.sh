@@ -7,6 +7,7 @@ DATA_DIR="$LINGODB_PATH/resources/data/ssb_simplified_tbl"
 
 SF=$1
 GENERATE_DATA=$2
+SM=75
 
 if [[ $GENERATE_DATA == 1 ]]; then
   pushd "$CRYSTAL_PATH/test"
@@ -28,7 +29,7 @@ do
     filename=$(basename "$file" .cu)
     echo "Processing $filename"
     pushd "$CRYSTAL_PATH"
-    make bin/ssb/$filename
+    make SM=$SM bin/ssb/$filename
     popd
     QUERIES+=("$filename")
 done
@@ -44,7 +45,7 @@ rm -rf $CSV_OUTPUT_FILE
 
 for q in ${QUERIES[@]}
 do
-    nvprof --print-gpu-trace ./bin/ssb/$q >> $RAW_OUTPUT_FILE
+  ./bin/ssb/$q --dataSetPath=$DATA_DIR  > $RAW_OUTPUT_FILE
 done
 
 

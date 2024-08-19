@@ -48,5 +48,5 @@ if __name__ == "__main__":
     if args.action == 'gen':
         gen_data(args.dataset, args.scale_factor)
     elif args.action == 'transform':
-        transform_my(args.dataset, args.scale_factor)
+        transform(args.dataset, args.scale_factor)
 

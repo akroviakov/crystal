@@ -1,18 +1,12 @@
 CUDA_PATH       ?= /usr/local/cuda
 CUDA_INC_PATH   ?= $(CUDA_PATH)/include
 CUDA_BIN_PATH   ?= $(CUDA_PATH)/bin
+SM   ?= 60
 
 NVCC = nvcc
 
-SM_TARGETS   = -gencode=arch=compute_60,code=\"sm_60,compute_60\" 
-SM_DEF     = -DSM600
-
-#SM_TARGETS   = -gencode=arch=compute_70,code=\"sm_70,compute_70\" 
-#SM_DEF     = -DSM700
-
-GENCODE_SM50    := -gencode arch=compute_60,code=sm_60
-#GENCODE_SM70    := -gencode arch=compute_70,code=sm_70
-GENCODE_FLAGS   := $(GENCODE_SM50)
+SM_TARGETS   = -gencode=arch=compute_$(SM),code=\"sm_$(SM),compute_$(SM)\" 
+SM_DEF     = -DSM$(SM)0
 
 NVCCFLAGS += --std=c++17 $(SM_DEF) -Xptxas="-dlcm=cg -v" -lineinfo -Xcudafe -\# 
 

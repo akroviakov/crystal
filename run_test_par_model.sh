@@ -3,6 +3,7 @@
 # Example: ./run_test_selected.sh ~/somepath/resources/data/ssb_simplified/ 1 PROFILE
 DATA_DIR=$1
 SF=$2
+SM=75
 
 make clean
 make
@@ -20,7 +21,7 @@ do
     filename=$(basename "$file" .cu)
     echo "Processing $filename"
     pushd "$SCRIPT_DIR"
-    make bin/ssb/$filename
+    make SM=$SM bin/ssb/$filename
     popd
     QUERIES+=("$filename")
 done
@@ -44,7 +45,7 @@ for q in ${QUERIES[@]}
 do
   for bsize in ${BATCH_SIZES[@]}
   do
-    ./bin/ssb/$q --batchSize=$bsize >> $RAW_OUTPUT_FILE
+    ./bin/ssb/$q --batchSize=$bsize --dataSetPath=$DATA_DIR >> $RAW_OUTPUT_FILE
   done
 done
 

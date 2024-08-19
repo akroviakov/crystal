@@ -14,6 +14,21 @@
 
 #define ALLOCATE(vec,size) CubDebugExit(g_allocator.DeviceAllocate((void**)&vec, size))
 
+__device__ inline void prefetch_l1(const void *p) {
+  asm("prefetch.global.L1 [%0];" : : "l"(p));
+}
+
+__device__ inline int noncached_read(const int* ptr) {
+    int value;
+    asm("ld.global.nc.s32 %0, [%1];" : "=r"(value) : "l"(ptr));
+    return value;
+}
+
+__device__ inline void prefetch_l2(const void *p) {
+  asm("prefetch.global.L2 [%0];" : : "l"(p));
+}
+
+
 template<typename T>
 T* loadToGPU(T* src, int numEntries, cub::CachingDeviceAllocator& g_allocator) {
   T* dest;

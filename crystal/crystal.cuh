@@ -6,4 +6,4 @@
 #include "store.cuh"
 #include "reduce.cuh"
 #include "join.cuh"
-
+#include "term.cuh"

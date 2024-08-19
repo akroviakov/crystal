@@ -7,26 +7,73 @@
 
 using namespace std;
 
-#define SF 10
-
-#define BASE_PATH "/home/kroviakov/lingodb/crystal/test/ssb/data/"
+#define SF 1
 
 #if SF == 1
-#define DATA_DIR BASE_PATH "s1_columnar/"
+#define DATA_DIR "s1_columnar/"
 #define LO_LEN 6001171
 #define P_LEN 200000
 #define S_LEN 2000
 #define C_LEN 30000
 #define D_LEN 2556
+#elif SF == 2
+#define DATA_DIR "s2_columnar/"
+#define LO_LEN 11998051
+#define P_LEN 400000
+#define S_LEN 4000
+#define C_LEN 60000
+#define D_LEN 2556
+#elif SF == 4
+#define DATA_DIR "s4_columnar/"
+#define LO_LEN 23996670
+#define P_LEN 600000
+#define S_LEN 8000
+#define C_LEN 120000
+#define D_LEN 2556
+#elif SF == 8
+#define DATA_DIR "s8_columnar/"
+#define LO_LEN 47989129
+#define P_LEN 800000
+#define S_LEN 16000
+#define C_LEN 240000
+#define D_LEN 2556
 #elif SF == 10
-#define DATA_DIR BASE_PATH "s10_columnar/"
+#define DATA_DIR "s10_columnar/"
 #define LO_LEN 59986214
 #define P_LEN 800000
 #define S_LEN 20000
 #define C_LEN 300000
 #define D_LEN 2556
+#elif SF == 16
+#define DATA_DIR "s16_columnar/"
+#define LO_LEN 95988758
+#define P_LEN 1000000
+#define S_LEN 32000
+#define C_LEN 480000
+#define D_LEN 2556
+#elif SF == 32
+#define DATA_DIR "s32_columnar/"
+#define LO_LEN 192000754
+#define P_LEN 1200000
+#define S_LEN 64000
+#define C_LEN 960000
+#define D_LEN 2556
+#elif SF == 64
+#define DATA_DIR "s64_columnar/"
+#define LO_LEN 384016864
+#define P_LEN 1400000
+#define S_LEN 128000
+#define C_LEN 1920000
+#define D_LEN 2556
+#elif SF == 128
+#define DATA_DIR "s128_columnar/"
+#define LO_LEN 768047048
+#define P_LEN 1600000
+#define S_LEN 256000
+#define C_LEN 3840000
+#define D_LEN 2556
 #else // 20
-#define DATA_DIR BASE_PATH "s20_columnar/"
+#define DATA_DIR "s20_columnar/"
 #define LO_LEN 119994746
 #define P_LEN 1000000
 #define S_LEN 40000
@@ -72,11 +119,12 @@ string lookup(string col_name) {
 }
 
 template<typename T>
-T* loadColumn(string col_name, int num_entries) {
+T* loadColumn(string dataSetPath, string col_name, int num_entries) {
   T* h_col = new T[num_entries];
-  string filename = DATA_DIR + lookup(col_name);
+  string filename = dataSetPath + DATA_DIR + lookup(col_name);
   ifstream colData (filename.c_str(), ios::in | ios::binary);
   if (!colData) {
+    printf("[loadColumn] No coldata, searched in: %s\n", filename.c_str());
     return NULL;
   }
 
@@ -85,10 +133,11 @@ T* loadColumn(string col_name, int num_entries) {
 }
 
 template<typename T>
-int storeColumn(string col_name, int num_entries, int* h_col) {
-  string filename = DATA_DIR + lookup(col_name);
+int storeColumn(string dataSetPath, string col_name, int num_entries, int* h_col) {
+  string filename = dataSetPath + DATA_DIR + lookup(col_name);
   ofstream colData (filename.c_str(), ios::out | ios::binary);
   if (!colData) {
+    printf("[storeColumn] No coldata, searched in: %s\n", filename.c_str());
     return -1;
   }
 

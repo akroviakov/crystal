@@ -22,6 +22,12 @@ using namespace std;
 bool                    g_verbose = false;  // Whether to display input/output to console
 cub::CachingDeviceAllocator  g_allocator(true);  // Caching allocator for device memory
 
+enum QueryVariant {
+    Vector = 0,
+    Vector_opt = 1,
+    Compiled = 2
+};
+
 template<int BLOCK_THREADS, int ITEMS_PER_THREAD>
 __global__ void DeviceSelectIfCompiled(int* lo_orderdate, int* lo_discount, int* lo_quantity, int* lo_extendedprice,
     int lo_num_entries, unsigned long long* revenue, int batchId=-1) {
@@ -56,7 +62,7 @@ __global__ void DeviceSelectIfCompiled(int* lo_orderdate, int* lo_discount, int*
   }
 }
 
-template<int BLOCK_THREADS, int ITEMS_PER_THREAD>
+template<int BLOCK_THREADS, int ITEMS_PER_THREAD, QueryVariant QImpl>
 __global__ void DeviceSelectIf(int* lo_orderdate, int* lo_discount, int* lo_quantity, int* lo_extendedprice,
     int lo_num_entries, unsigned long long* revenue) {
   // Load a segment of consecutive items that are blocked across threads
@@ -73,21 +79,45 @@ __global__ void DeviceSelectIf(int* lo_orderdate, int* lo_discount, int* lo_quan
   if (blockIdx.x == num_tiles - 1) {
     num_tile_items = lo_num_entries - tile_offset;
   }
+  if constexpr (QImpl == QueryVariant::Vector){
+    BlockLoad<int, BLOCK_THREADS, ITEMS_PER_THREAD>(lo_orderdate + tile_offset, items, num_tile_items);
+    BlockPredGTE<int, BLOCK_THREADS, ITEMS_PER_THREAD>(items, 19940204, selection_flags, num_tile_items);
+    BlockPredAndLTE<int, BLOCK_THREADS, ITEMS_PER_THREAD>(items, 19940210, selection_flags, num_tile_items);
 
-  BlockLoad<int, BLOCK_THREADS, ITEMS_PER_THREAD>(lo_orderdate + tile_offset, items, num_tile_items);
-  BlockPredGTE<int, BLOCK_THREADS, ITEMS_PER_THREAD>(items, 19940204, selection_flags, num_tile_items);
-  BlockPredAndLTE<int, BLOCK_THREADS, ITEMS_PER_THREAD>(items, 19940210, selection_flags, num_tile_items);
+    BlockLoad<int, BLOCK_THREADS, ITEMS_PER_THREAD>(lo_quantity + tile_offset, items, num_tile_items);
+    BlockPredAndGTE<int, BLOCK_THREADS, ITEMS_PER_THREAD>(items, 26, selection_flags, num_tile_items);
+    BlockPredAndLTE<int, BLOCK_THREADS, ITEMS_PER_THREAD>(items, 35, selection_flags, num_tile_items);
 
-  BlockLoad<int, BLOCK_THREADS, ITEMS_PER_THREAD>(lo_quantity + tile_offset, items, num_tile_items);
-  BlockPredAndGTE<int, BLOCK_THREADS, ITEMS_PER_THREAD>(items, 26, selection_flags, num_tile_items);
-  BlockPredAndLTE<int, BLOCK_THREADS, ITEMS_PER_THREAD>(items, 35, selection_flags, num_tile_items);
+    BlockLoad<int, BLOCK_THREADS, ITEMS_PER_THREAD>(lo_discount + tile_offset, items, num_tile_items);
+    BlockPredAndGTE<int, BLOCK_THREADS, ITEMS_PER_THREAD>(items, 5, selection_flags, num_tile_items);
+    BlockPredAndLTE<int, BLOCK_THREADS, ITEMS_PER_THREAD>(items, 7, selection_flags, num_tile_items);
 
-  BlockLoad<int, BLOCK_THREADS, ITEMS_PER_THREAD>(lo_discount + tile_offset, items, num_tile_items);
-  BlockPredAndGTE<int, BLOCK_THREADS, ITEMS_PER_THREAD>(items, 5, selection_flags, num_tile_items);
-  BlockPredAndLTE<int, BLOCK_THREADS, ITEMS_PER_THREAD>(items, 7, selection_flags, num_tile_items);
+    BlockLoad<int, BLOCK_THREADS, ITEMS_PER_THREAD>(lo_extendedprice + tile_offset, items2, num_tile_items);
+  } else {
+    BlockLoad<int, BLOCK_THREADS, ITEMS_PER_THREAD>(lo_orderdate + tile_offset,
+                                                    items, num_tile_items);
+    BlockPredGTE<int, BLOCK_THREADS, ITEMS_PER_THREAD>(
+        items, 19940204, selection_flags, num_tile_items);
+    BlockPredAndLTE<int, BLOCK_THREADS, ITEMS_PER_THREAD>(
+        items, 19940210, selection_flags, num_tile_items);
 
-  BlockLoad<int, BLOCK_THREADS, ITEMS_PER_THREAD>(lo_extendedprice + tile_offset, items2, num_tile_items);
+    BlockPredLoad<int, BLOCK_THREADS, ITEMS_PER_THREAD>(
+        lo_quantity + tile_offset, items, num_tile_items, selection_flags);
+    BlockPredAndGTE<int, BLOCK_THREADS, ITEMS_PER_THREAD>(
+        items, 26, selection_flags, num_tile_items);
+    BlockPredAndLTE<int, BLOCK_THREADS, ITEMS_PER_THREAD>(
+        items, 35, selection_flags, num_tile_items);
 
+    BlockPredLoad<int, BLOCK_THREADS, ITEMS_PER_THREAD>(
+        lo_discount + tile_offset, items, num_tile_items, selection_flags);
+    BlockPredAndGTE<int, BLOCK_THREADS, ITEMS_PER_THREAD>(
+        items, 5, selection_flags, num_tile_items);
+    BlockPredAndLTE<int, BLOCK_THREADS, ITEMS_PER_THREAD>(
+        items, 7, selection_flags, num_tile_items);
+
+    BlockPredLoad<int, BLOCK_THREADS, ITEMS_PER_THREAD>(
+        lo_extendedprice + tile_offset, items2, num_tile_items, selection_flags);
+  }
   #pragma unroll
   for (int ITEM = 0; ITEM < ITEMS_PER_THREAD; ++ITEM)
   {
@@ -107,11 +137,6 @@ __global__ void DeviceSelectIf(int* lo_orderdate, int* lo_discount, int* lo_quan
   }
 }
 
-enum QueryVariant {
-    Vector = 0,
-    Compiled = 1,
-    Compiled_Multi = 2
-};
 
 template<QueryVariant QImpl>
 float runQuery(int* lo_orderdate, int* lo_discount, int* lo_quantity, int* lo_extendedprice, 
@@ -130,9 +155,9 @@ float runQuery(int* lo_orderdate, int* lo_discount, int* lo_quantity, int* lo_ex
   cudaMemset(d_sum, 0, sizeof(long long));
 
   // Run
-  if constexpr(QImpl == QueryVariant::Vector){
+  if constexpr(QImpl == QueryVariant::Vector || QImpl == QueryVariant::Vector_opt){
     int tile_items = 128*4;
-    TIME_FUNC((DeviceSelectIf<128,4><<<(lo_num_entries + tile_items - 1)/tile_items, 128>>>(lo_orderdate, 
+    TIME_FUNC((DeviceSelectIf<128,4,QImpl><<<(lo_num_entries + tile_items - 1)/tile_items, 128>>>(lo_orderdate, 
             lo_discount, lo_quantity, lo_extendedprice, lo_num_entries, d_sum)), time_query);
   } else {
     constexpr int batchSize{20000};
@@ -168,11 +193,13 @@ float runQuery(int* lo_orderdate, int* lo_discount, int* lo_quantity, int* lo_ex
  */
 int main(int argc, char** argv)
 {
-  int num_trials          = 3;
+  int num_trials          = 10;
 
   // Initialize command line
   CommandLineArgs args(argc, argv);
   args.GetCmdLineArgument("t", num_trials);
+  string dataSetPath;
+  args.GetCmdLineArgument("dataSetPath", dataSetPath);
 
   // Print usage
   if (args.CheckCmdLineFlag("help"))
@@ -187,12 +214,12 @@ int main(int argc, char** argv)
   // Initialize device
   CubDebugExit(args.DeviceInit());
 
-  int *h_lo_orderdate = loadColumn<int>("lo_orderdate", LO_LEN);
-  int *h_lo_discount = loadColumn<int>("lo_discount", LO_LEN);
-  int *h_lo_quantity = loadColumn<int>("lo_quantity", LO_LEN);
-  int *h_lo_extendedprice = loadColumn<int>("lo_extendedprice", LO_LEN);
-  int *h_d_datekey = loadColumn<int>("d_datekey", D_LEN);
-  int *h_d_year = loadColumn<int>("d_year", D_LEN);
+  int *h_lo_orderdate = loadColumn<int>(dataSetPath,"lo_orderdate", LO_LEN);
+  int *h_lo_discount = loadColumn<int>(dataSetPath,"lo_discount", LO_LEN);
+  int *h_lo_quantity = loadColumn<int>(dataSetPath,"lo_quantity", LO_LEN);
+  int *h_lo_extendedprice = loadColumn<int>(dataSetPath,"lo_extendedprice", LO_LEN);
+  int *h_d_datekey = loadColumn<int>(dataSetPath,"d_datekey", D_LEN);
+  int *h_d_year = loadColumn<int>(dataSetPath,"d_year", D_LEN);
 
   cout << "** LOADED DATA **" << endl;
 
@@ -210,6 +237,15 @@ int main(int argc, char** argv)
     time_query = runQuery<QueryVariant::Vector>(d_lo_orderdate, d_lo_discount, d_lo_quantity, d_lo_extendedprice, LO_LEN, g_allocator);
     cout<< "{"
         << "\"type\":vec" 
+        << ",\"query\":13" 
+        << ",\"time_query\":" << time_query
+        << "}" << endl;
+  }
+  for (int t = 0; t < num_trials; t++) {
+    float time_query;
+    time_query = runQuery<QueryVariant::Vector_opt>(d_lo_orderdate, d_lo_discount, d_lo_quantity, d_lo_extendedprice, LO_LEN, g_allocator);
+    cout<< "{"
+        << "\"type\":vecOpt" 
         << ",\"query\":13" 
         << ",\"time_query\":" << time_query
         << "}" << endl;
