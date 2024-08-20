@@ -10,7 +10,7 @@ SM=75
 echo "BATCHSIZE $BATCH_SIZE"
 
 if [ $# -lt 4 ]; then
-  BATCH_SIZE=20000
+  BATCH_SIZE=0
 fi
 echo "BATCHSIZE $BATCH_SIZE"
 make clean
@@ -22,7 +22,7 @@ SCRIPT_DIR=$(dirname "$SCRIPT_PATH")
 pushd "src/ssb"
 sed -i "s/#define SF [^ ]*/#define SF $SF/g" ssb_utils.h
 #  "q12.cu" "q13.cu" "q21.cu" "q22.cu" "q23.cu" "q41.cu" "q42.cu" "q43.cu"
-files=("q11.cu" "q12.cu" "q13.cu" "q21.cu") #("q11.cu" "q12.cu" "q13.cu" "q21.cu" "q22.cu" "q23.cu" "q41.cu" "q42.cu" "q43.cu")
+files=("q11.cu" "q12.cu" "q13.cu" "q21.cu" "q22.cu" "q23.cu" "q31.cu" "q32.cu" "q33.cu" "q34.cu" "q41.cu" "q42.cu" "q43.cu") #("q11.cu" "q12.cu" "q13.cu" "q21.cu" "q22.cu" "q23.cu" "q41.cu" "q42.cu" "q43.cu")
 QUERIES=()
 
 for file in "${files[@]}"

@@ -22,56 +22,86 @@ using namespace std;
 bool                    g_verbose = false;  // Whether to display input/output to console
 cub::CachingDeviceAllocator  g_allocator(true);  // Caching allocator for device memory
 
-enum QueryVariant {
-    Vector = 0,
-    Vector_opt = 1,
-    Compiled = 2
-};
-
-template<int BLOCK_THREADS, int ITEMS_PER_THREAD>
+template<QueryVariant QImpl>
 __global__ void probeCompiled(int* lo_orderdate, int* lo_partkey, int* lo_custkey, int* lo_suppkey, int* lo_revenue, int* lo_supplycost, int lo_len,
     int* ht_p, int p_len,
     int* ht_s, int s_len,
     int* ht_c, int c_len,
     int* ht_d, int d_len,
-    int* res) {
-  int tile_offset = blockIdx.x * TILE_SIZE;
-  int num_tiles = (lo_len + TILE_SIZE - 1) / TILE_SIZE;
-  int num_tile_items = TILE_SIZE;
-
-  if (blockIdx.x == num_tiles - 1) {
-    num_tile_items = lo_len - tile_offset;
-  }
-
-  for(int i = 0; i < ITEMS_PER_THREAD; i++){
-    if(threadIdx.x + i * BLOCK_THREADS < num_tile_items){
-      int offset = tile_offset + threadIdx.x + BLOCK_THREADS * i;
-      if(offset >= lo_len) {continue;}
-      int hash_s = HASH(lo_suppkey[offset], s_len, 0);
-      uint64_t s_slot = *reinterpret_cast<uint64_t*>(&ht_s[hash_s << 1]);
-      if(s_slot){
-        int s_city = (s_slot >> 32);
-        int hash_c = HASH(lo_custkey[offset], c_len, 0);
-        if(ht_c[hash_c]){
-          int hash_p = HASH(lo_partkey[offset], p_len, 0);
-          uint64_t p_slot = *reinterpret_cast<uint64_t*>(&ht_p[hash_p << 1]);
-          if(p_slot){
-            int brand = (p_slot >> 32);
-            int hash_d = HASH(lo_orderdate[offset], d_len, 19920101);
-            uint64_t d_slot = *reinterpret_cast<uint64_t*>(&ht_d[hash_d << 1]);
-            if(d_slot){
-              int year{(d_slot >> 32)};
-              int hash = ((year - 1992) * 250 * 1000 + s_city * 1000 + brand) % ((1998-1992+1) * 250 * 1000);
-              res[hash * 4] = year;
-              res[hash * 4 + 1] = s_city;
-              res[hash * 4 + 2] = brand;
-              atomicAdd(&res[hash * 4 + 3], (lo_revenue[offset] - lo_supplycost[offset]));
-            }
+    int* res, int batchSize) {
+  auto body = [=] __device__ (int offset) {
+    int hash_s = HASH(lo_suppkey[offset], s_len, 0);
+    uint64_t s_slot = *reinterpret_cast<uint64_t*>(&ht_s[hash_s << 1]);
+    if(s_slot){
+      int s_city = (s_slot >> 32);
+      int hash_c = HASH(lo_custkey[offset], c_len, 0);
+      if(ht_c[hash_c]){
+        int hash_p = HASH(lo_partkey[offset], p_len, 0);
+        uint64_t p_slot = *reinterpret_cast<uint64_t*>(&ht_p[hash_p << 1]);
+        if(p_slot){
+          int brand = (p_slot >> 32);
+          int hash_d = HASH(lo_orderdate[offset], d_len, 19920101);
+          uint64_t d_slot = *reinterpret_cast<uint64_t*>(&ht_d[hash_d << 1]);
+          if(d_slot){
+            int year{(d_slot >> 32)};
+            int hash = ((year - 1992) * 250 * 1000 + s_city * 1000 + brand) % ((1998-1992+1) * 250 * 1000);
+            res[hash * 4] = year;
+            res[hash * 4 + 1] = s_city;
+            res[hash * 4 + 2] = brand;
+            atomicAdd(&res[hash * 4 + 3], (lo_revenue[offset] - lo_supplycost[offset]));
           }
         }
       }
     }
-  }
+  };
+  scanLoop<QImpl>(lo_len, batchSize, body);
+}
+
+template<QueryVariant QImpl>
+__global__ void build_hashtable_c_Compiled(int *filter_col, int *dim_key, int num_tuples, int *hash_table, int num_slots, int batchSize) {
+  auto body = [=] __device__ (int offset) {
+    if(filter_col[offset] == 1){
+      int hash = HASH(dim_key[offset], num_slots, 0);
+      atomicCAS(&hash_table[hash], 0, dim_key[offset]);
+    }
+  };
+  scanLoop<QImpl>(num_tuples, batchSize, body);
+}
+
+template<QueryVariant QImpl>
+__global__ void build_hashtable_p_Compiled(int* filter_col, int *dim_key, int* dim_val, int num_tuples, int *hash_table, int num_slots, int batchSize) {
+  auto body = [=] __device__ (int offset) {
+    if(filter_col[offset] == 3){
+      int hash = HASH(dim_key[offset], num_slots, 0);
+      atomicCAS(&hash_table[hash << 1], 0, dim_key[offset]);
+      hash_table[(hash << 1) + 1] = dim_val[offset];
+    }
+  };
+  scanLoop<QImpl>(num_tuples, batchSize, body);
+}
+
+template<QueryVariant QImpl>
+__global__ void build_hashtable_s_Compiled(int* filter_col, int *dim_key, int *dim_val, int num_tuples, int *hash_table, int num_slots, int batchSize) {
+  auto body = [=] __device__ (int offset) {
+    if(filter_col[offset] == 24){
+      int hash = HASH(dim_key[offset], num_slots, 0);
+      atomicCAS(&hash_table[hash << 1], 0, dim_key[offset]);
+      hash_table[(hash << 1) + 1] = dim_val[offset];
+    }
+  };
+  scanLoop<QImpl>(num_tuples, batchSize, body);
+}
+
+template<QueryVariant QImpl>
+__global__ void build_hashtable_d_Compiled(int *dim_key, int *dim_val, int num_tuples, int *hash_table, int num_slots, int val_min, int batchSize) {
+  auto body = [=] __device__ (int offset) {
+    if(dim_val[offset] == 1997 || dim_val[offset] == 1998){
+      int hash = HASH(dim_key[offset], num_slots, val_min);
+      atomicCAS(&hash_table[hash << 1], 0, dim_key[offset]);
+      hash_table[(hash << 1) + 1] = dim_val[offset];
+    }
+  };
+  scanLoop<QImpl>(num_tuples, batchSize, body);
 }
 
 template<int BLOCK_THREADS, int ITEMS_PER_THREAD, QueryVariant QImpl>
@@ -160,95 +190,6 @@ __global__ void probe(int* lo_orderdate, int* lo_partkey, int* lo_custkey, int* 
     }
   }
 }
-
-
-template<int BLOCK_THREADS, int ITEMS_PER_THREAD>
-__global__ void build_hashtable_c_Compiled(int *filter_col, int *dim_key, int num_tuples, int *hash_table, int num_slots) {
-  int tile_offset = blockIdx.x * TILE_SIZE;
-  int num_tiles = (num_tuples + TILE_SIZE - 1) / TILE_SIZE;
-  int num_tile_items = TILE_SIZE;
-
-  if (blockIdx.x == num_tiles - 1) {
-    num_tile_items = num_tuples - tile_offset;
-  }
-
-  for(int i = 0; i < ITEMS_PER_THREAD; i++){
-    if(threadIdx.x + i * BLOCK_THREADS < num_tile_items){
-      int offset = tile_offset + threadIdx.x + BLOCK_THREADS * i;
-      if(offset < num_tuples && filter_col[offset] == 1){
-        int hash = HASH(dim_key[offset], num_slots, 0);
-        atomicCAS(&hash_table[hash], 0, dim_key[offset]);
-      }
-    }
-  }
-}
-
-template<int BLOCK_THREADS, int ITEMS_PER_THREAD>
-__global__ void build_hashtable_p_Compiled(int* filter_col, int *dim_key, int* dim_val, int num_tuples, int *hash_table, int num_slots) {
-  int tile_offset = blockIdx.x * TILE_SIZE;
-  int num_tiles = (num_tuples + TILE_SIZE - 1) / TILE_SIZE;
-  int num_tile_items = TILE_SIZE;
-
-  if (blockIdx.x == num_tiles - 1) {
-    num_tile_items = num_tuples - tile_offset;
-  }
-
-  for(int i = 0; i < ITEMS_PER_THREAD; i++){
-    if(threadIdx.x + i * BLOCK_THREADS < num_tile_items){
-      int offset = tile_offset + threadIdx.x + BLOCK_THREADS * i;
-      if(offset < num_tuples && filter_col[offset] == 3){
-        int hash = HASH(dim_key[offset], num_slots, 0);
-        atomicCAS(&hash_table[hash << 1], 0, dim_key[offset]);
-        hash_table[(hash << 1) + 1] = dim_val[offset];
-      }
-    }
-  }
-}
-
-template<int BLOCK_THREADS, int ITEMS_PER_THREAD>
-__global__ void build_hashtable_s_Compiled(int* filter_col, int *dim_key, int *dim_val, int num_tuples, int *hash_table, int num_slots) {
-
-  int tile_offset = blockIdx.x * TILE_SIZE;
-  int num_tiles = (num_tuples + TILE_SIZE - 1) / TILE_SIZE;
-  int num_tile_items = TILE_SIZE;
-
-  if (blockIdx.x == num_tiles - 1) {
-    num_tile_items = num_tuples - tile_offset;
-  }
-  for(int i = 0; i < ITEMS_PER_THREAD; i++){
-    if(threadIdx.x + i * BLOCK_THREADS < num_tile_items){
-      int offset = tile_offset + threadIdx.x + BLOCK_THREADS * i;
-      if(offset < num_tuples && filter_col[offset] == 24){
-        int hash = HASH(dim_key[offset], num_slots, 0);
-        atomicCAS(&hash_table[hash << 1], 0, dim_key[offset]);
-        hash_table[(hash << 1) + 1] = dim_val[offset];
-      }
-    }
-  }
-}
-
-template<int BLOCK_THREADS, int ITEMS_PER_THREAD>
-__global__ void build_hashtable_d_Compiled(int *dim_key, int *dim_val, int num_tuples, int *hash_table, int num_slots, int val_min) {
-  int tile_offset = blockIdx.x * TILE_SIZE;
-  int num_tiles = (num_tuples + TILE_SIZE - 1) / TILE_SIZE;
-  int num_tile_items = TILE_SIZE;
-
-  if (blockIdx.x == num_tiles - 1) {
-    num_tile_items = num_tuples - tile_offset;
-  }
-
-  for(int i = 0; i < ITEMS_PER_THREAD; i++){
-    if(threadIdx.x + i * BLOCK_THREADS < num_tile_items){
-      int offset = tile_offset + threadIdx.x + BLOCK_THREADS * i;
-      if(offset < num_tuples && (dim_val[offset] == 1997 || dim_val[offset] == 1998)){
-        int hash = HASH(dim_key[offset], num_slots, val_min);
-        atomicCAS(&hash_table[hash << 1], 0, dim_key[offset]);
-        hash_table[(hash << 1) + 1] = dim_val[offset];
-      }
-    }
-  }
-}
-
 
 template<int BLOCK_THREADS, int ITEMS_PER_THREAD>
 __global__
@@ -377,7 +318,9 @@ float runQuery(int* lo_orderdate, int* lo_custkey, int* lo_partkey, int* lo_supp
 
   int tile_items = 128*4;
   int d_val_min = 19920101;
-  if constexpr(QImpl == QueryVariant::Vector || QImpl == QueryVariant::Vector_opt){
+  const int batchSize = getBatchSizeCompiled<QImpl>();
+  const int numBatches = (lo_len + batchSize - 1)/batchSize;
+  if constexpr(QImpl == QueryVariant::Vector || QImpl == QueryVariant::VectorOpt){
     build_hashtable_s<128,4><<<(s_len + tile_items - 1)/tile_items, 128>>>(s_nation, s_suppkey, s_city, s_len, ht_s, s_len);
     /*CHECK_ERROR();*/
 
@@ -389,20 +332,15 @@ float runQuery(int* lo_orderdate, int* lo_custkey, int* lo_partkey, int* lo_supp
 
     build_hashtable_d<128,4><<<(d_len + tile_items - 1)/tile_items, 128>>>(d_datekey, d_year, d_len, ht_d, d_val_len, d_val_min);
     /*CHECK_ERROR();*/
-  } else {
-    if constexpr(QImpl == QueryVariant::Compiled){
-      constexpr int batchSize{20000};
-      constexpr int numBatchesS{(S_LEN + batchSize - 1) / batchSize};
-      constexpr int numBatchesC{(C_LEN + batchSize - 1) / batchSize};
-      constexpr int numBatchesP{(P_LEN + batchSize - 1) / batchSize};
-      constexpr int numBatchesD{(D_LEN + batchSize - 1) / batchSize};
-      constexpr int numThreads{1024};
-      constexpr int elemPerThread{batchSize / numThreads + 1};
-      build_hashtable_s_Compiled<numThreads,elemPerThread><<<numBatchesS, numThreads>>>(s_nation, s_suppkey, s_city, s_len, ht_s, s_len);
-      build_hashtable_c_Compiled<numThreads,elemPerThread><<<numBatchesC, numThreads>>>(c_region, c_custkey, c_len, ht_c, c_len);
-      build_hashtable_p_Compiled<numThreads,elemPerThread><<<numBatchesP, numThreads>>>(p_category, p_partkey, p_brand1, p_len, ht_p, p_len);
-      build_hashtable_d_Compiled<numThreads,elemPerThread><<<numBatchesD, numThreads>>>(d_datekey, d_year, d_len, ht_d, d_val_len, d_val_min);
-    }
+  }else {
+    auto [gridSizeS, blockSizeS] = getLaunchConfigCompiled<QImpl>(build_hashtable_s_Compiled<QImpl>, getSMCount(), batchSize, numBatches);
+    auto [gridSizeC, blockSizeC] = getLaunchConfigCompiled<QImpl>(build_hashtable_c_Compiled<QImpl>, getSMCount(), batchSize, numBatches);
+    auto [gridSizeP, blockSizeP] = getLaunchConfigCompiled<QImpl>(build_hashtable_p_Compiled<QImpl>, getSMCount(), batchSize, numBatches);
+    auto [gridSizeD, blockSizeD] = getLaunchConfigCompiled<QImpl>(build_hashtable_d_Compiled<QImpl>, getSMCount(), batchSize, numBatches);
+    build_hashtable_s_Compiled<QImpl><<<gridSizeS, blockSizeS>>>(s_nation, s_suppkey, s_city, s_len, ht_s, s_len, batchSize);
+    build_hashtable_c_Compiled<QImpl><<<gridSizeC, blockSizeC>>>(c_region, c_custkey, c_len, ht_c, c_len, batchSize);
+    build_hashtable_p_Compiled<QImpl><<<gridSizeP, blockSizeP>>>(p_category, p_partkey, p_brand1, p_len, ht_p, p_len, batchSize);
+    build_hashtable_d_Compiled<QImpl><<<gridSizeD, blockSizeD>>>(d_datekey, d_year, d_len, ht_d, d_val_len, d_val_min, batchSize);
   }
   cudaEventRecord(stop_build, 0);
   cudaEventSynchronize(stop_build);
@@ -417,22 +355,15 @@ float runQuery(int* lo_orderdate, int* lo_custkey, int* lo_partkey, int* lo_supp
   CubDebugExit(cudaMemset(res, 0, res_array_size * sizeof(int)));
 
   // Run
-  if constexpr(QImpl == QueryVariant::Vector || QImpl == QueryVariant::Vector_opt){
+  if constexpr(QImpl == QueryVariant::Vector || QImpl == QueryVariant::VectorOpt){
     probe<128,4,QImpl><<<(lo_len + tile_items - 1)/tile_items, 128>>>(lo_orderdate, lo_partkey,
           lo_custkey, lo_suppkey, lo_revenue, lo_supplycost, lo_len, ht_p, p_len, ht_s, s_len, ht_c, c_len, ht_d, d_val_len, res);
   } else {
-    if constexpr(QImpl == QueryVariant::Compiled){
-      constexpr int batchSize{20000};
-      int numBatches{(lo_len + batchSize - 1) / batchSize};
-      constexpr int numThreads{1024};
-      constexpr int elemPerThread{(batchSize + numThreads - 1)/ numThreads};
-      probeCompiled<numThreads,elemPerThread><<<numBatches, numThreads>>>(lo_orderdate, lo_partkey,
-          lo_custkey, lo_suppkey, lo_revenue, lo_supplycost, lo_len, ht_p, p_len, ht_s, s_len, ht_c, c_len, ht_d, d_val_len, res);
-
-      // probeCompiled<128,4><<<(lo_len + tile_items - 1)/tile_items, 128>>>(lo_orderdate, lo_partkey,
-          // lo_custkey, lo_suppkey, lo_revenue, lo_supplycost, lo_len, ht_p, p_len, ht_s, s_len, ht_c, c_len, ht_d, d_val_len, res);
- 
-    }
+    auto [gridSize, blockSize] = getLaunchConfigCompiled<QImpl>(probeCompiled<QImpl>, getSMCount(), batchSize, numBatches);
+    probeCompiled<QImpl><<<gridSize, blockSize>>>(lo_orderdate, lo_partkey,
+          lo_custkey, lo_suppkey, lo_revenue, lo_supplycost, lo_len, ht_p, p_len, ht_s, s_len, ht_c, c_len, ht_d, d_val_len, res, batchSize);
+    // probeCompiled<128,4><<<(lo_len + tile_items - 1)/tile_items, 128>>>(lo_orderdate, lo_partkey,
+        // lo_custkey, lo_suppkey, lo_revenue, lo_supplycost, lo_len, ht_p, p_len, ht_s, s_len, ht_c, c_len, ht_d, d_val_len, res);
   }
   cudaEventRecord(stop, 0);
   cudaEventSynchronize(stop);
@@ -544,7 +475,7 @@ int main(int argc, char** argv)
         d_c_custkey, d_c_region, C_LEN,
         g_allocator);
     cout<< "{"
-        << "\"type\":vec" 
+        << "\"type\":Vector" 
         << ",\"query\":43" 
         << ",\"time_query\":" << time_query
         << "}" << endl;
@@ -552,7 +483,7 @@ int main(int argc, char** argv)
   cout << "** VECTOR-OPT TEST **" << endl;
   for (int t = 0; t < num_trials; t++) {
     float time_query;
-    time_query = runQuery<QueryVariant::Vector>(
+    time_query = runQuery<QueryVariant::VectorOpt>(
         d_lo_orderdate, d_lo_custkey, d_lo_partkey, d_lo_suppkey, d_lo_revenue, d_lo_supplycost, LO_LEN,
         d_d_datekey, d_d_year, D_LEN,
         d_p_partkey, d_p_category, d_p_brand1, P_LEN,
@@ -560,15 +491,15 @@ int main(int argc, char** argv)
         d_c_custkey, d_c_region, C_LEN,
         g_allocator);
     cout<< "{"
-        << "\"type\":vecOpt" 
+        << "\"type\":VectorOpt" 
         << ",\"query\":43" 
         << ",\"time_query\":" << time_query
         << "}" << endl;
   }
-  cout << "** COMPILED TEST **" << endl;
+  cout << "** CompiledBatchToSM TEST **" << endl;
   for (int t = 0; t < num_trials; t++) {
     float time_query;
-    time_query = runQuery<QueryVariant::Compiled>(
+    time_query = runQuery<QueryVariant::CompiledBatchToSM>(
         d_lo_orderdate, d_lo_custkey, d_lo_partkey, d_lo_suppkey, d_lo_revenue, d_lo_supplycost, LO_LEN,
         d_d_datekey, d_d_year, D_LEN,
         d_p_partkey, d_p_category, d_p_brand1, P_LEN,
@@ -576,7 +507,23 @@ int main(int argc, char** argv)
         d_c_custkey, d_c_region, C_LEN,
         g_allocator);
     cout<< "{"
-        << "\"type\":comp" 
+        << "\"type\":CompiledBatchToSM" 
+        << ",\"query\":43" 
+        << ",\"time_query\":" << time_query
+        << "}" << endl;
+  }
+  cout << "** CompiledBatchToGPU TEST **" << endl;
+  for (int t = 0; t < num_trials; t++) {
+    float time_query;
+    time_query = runQuery<QueryVariant::CompiledBatchToGPU>(
+        d_lo_orderdate, d_lo_custkey, d_lo_partkey, d_lo_suppkey, d_lo_revenue, d_lo_supplycost, LO_LEN,
+        d_d_datekey, d_d_year, D_LEN,
+        d_p_partkey, d_p_category, d_p_brand1, P_LEN,
+        d_s_suppkey, d_s_nation, d_s_city, S_LEN,
+        d_c_custkey, d_c_region, C_LEN,
+        g_allocator);
+    cout<< "{"
+        << "\"type\":CompiledBatchToGPU" 
         << ",\"query\":43" 
         << ",\"time_query\":" << time_query
         << "}" << endl;
