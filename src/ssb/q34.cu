@@ -330,7 +330,7 @@ float runQuery(int* lo_orderdate, int* lo_custkey, int* lo_suppkey, int* lo_reve
  */
 int main(int argc, char** argv)
 {
-  int num_trials          = 3;
+  int num_trials          = 10;
 
   // Initialize command line
   CommandLineArgs args(argc, argv);

@@ -21,26 +21,31 @@ def plot_execution_times(file, SF):
 
     df = pd.read_csv(file)
     df['name'] = df['name'].str[:-4] 
-    df = df[df['type'] != 'comp_omnisci']
 
     median_execution_times = df.groupby(['name', 'type'])['executionTime'].median().unstack()
+    proportions = median_execution_times.div(median_execution_times.max(axis=1), axis=0) * 100
+
     fig, ax = plt.subplots(figsize=(12, 4))
-    bars = median_execution_times.plot(kind='bar', ax=ax, color=colors[:len(median_execution_times.columns)], edgecolor='black', zorder=2)
-    for i, bar in enumerate(ax.patches):
-        bar.set_hatch(color_to_hatch[bar.get_facecolor()]) #hatch_patterns[i % len(hatch_patterns)])
-        ax.annotate(f'{bar.get_height():.2f}', 
-                    (bar.get_x() + bar.get_width() / 2., bar.get_height()), 
-                    ha='center', va='center', 
-                    xytext=(0, 5), 
-                    textcoords='offset points',
-                    fontsize=6)  
+    bars = proportions.plot(kind='bar', ax=ax, color=colors[:len(proportions.columns)], edgecolor='black', zorder=2)
+    for container in bars.containers:
+        for i, bar in enumerate(container): 
+            name = proportions.index[i]
+            column = container.get_label()
+            original_value = median_execution_times.loc[name, column]
+            bar.set_hatch(color_to_hatch[bar.get_facecolor()]) #hatch_patterns[i % len(hatch_patterns)])
+            ax.annotate(f'{original_value:.2f}', 
+                        (bar.get_x() + bar.get_width() / 2., bar.get_height()), 
+                        ha='center', va='center', 
+                        xytext=(0, 5), 
+                        textcoords='offset points',
+                        fontsize=8)  
 
     ax.set_xticklabels(ax.get_xticklabels(), rotation=0, ha='center')
     # Customize the plot using the Axes object
     ax.set_xlabel('SSB Query')
-    ax.set_ylabel('Median Execution Time (ms)')
+    ax.set_ylabel('Relative Execution Time (%)')
     ax.set_title(f'Query implementations comparison (SF={SF})')
-    ax.legend(title='Query implementation', loc='upper left')
+    ax.legend(title='Query implementation', loc='upper left', bbox_to_anchor=(1, 0.5))
 
     ax.grid(True,zorder=1)
     fig.tight_layout()
