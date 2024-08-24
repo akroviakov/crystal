@@ -29,11 +29,42 @@ __device__ inline void prefetch_l2(const void *p) {
 }
 
 enum QueryVariant {
-    Vector = 0,
-    VectorOpt = 1,
-    CompiledBatchToSM = 2,
-    CompiledBatchToGPU = 3,
+  Vector = 0,
+  VectorOpt = 1,
+  CompiledBatchToSM = 2,
+  CompiledBatchToGPU = 3,
 };
+
+enum Prefetch {
+  NONE = 0,
+  L1 = 1,
+  L2 = 2
+};
+
+enum ReadCacheMode {
+  PERSIST = 0,
+  STREAM = 1
+};
+
+template<ReadCacheMode CacheMode = PERSIST>
+__device__ inline int readAs(const int *p) {
+  if constexpr(CacheMode == ReadCacheMode::STREAM)
+    return noncached_read(p);
+  else 
+    return *p;
+}
+
+
+template<Prefetch PrefSetting>
+__device__ inline void prefetchPtrTo(const void *p) {
+  // Prefetch *cache line* containing address
+  if constexpr(PrefSetting == Prefetch::L1){
+    prefetch_l1(p); // Any different from L2?
+  } else {
+    prefetch_l2(p);
+  }
+}
+
 
 int getSMCount() {
     int device;
@@ -116,9 +147,15 @@ __host__ inline std::pair<int, int> getLaunchConfigCompiled(T kernel, const int 
     gridSize = numBatches;
     blockSize = std::min(batchSize, 1024);
   } else {
-    cudaOccupancyMaxPotentialBlockSize(&gridSize, &blockSize, kernel, 0, 0); 
-    // gridSize = numSMs;
-    // blockSize = std::min(batchSize, 1024);
+    // Compare against CompiledBatchToSM
+    gridSize = (batchSize * numBatches) / getBatchSizeCompiled<QueryVariant::CompiledBatchToSM>();
+    blockSize = std::min(batchSize, 1024);
+    // HeavyDB way:
+    // cudaOccupancyMaxPotentialBlockSize(&gridSize, &blockSize, kernel, 0, 0); 
+    // // Adjust for more *possible* parallelism
+    // if(gridSize == numSMs){
+    //   gridSize *= 100;
+    // }
   } 
   return {gridSize, blockSize};
 }

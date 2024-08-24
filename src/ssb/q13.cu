@@ -22,7 +22,7 @@ using namespace std;
 bool                    g_verbose = false;  // Whether to display input/output to console
 cub::CachingDeviceAllocator  g_allocator(true);  // Caching allocator for device memory
 
-template<QueryVariant QImpl>
+template<QueryVariant QImpl, Prefetch PrefetchSetting = Prefetch::NONE>
 __global__ void DeviceSelectIfCompiled(int* lo_orderdate, int* lo_discount, int* lo_quantity, int* lo_extendedprice,
     int lo_num_entries, unsigned long long* revenue, int batchSize) {
   long long sum = 0;
@@ -32,11 +32,31 @@ __global__ void DeviceSelectIfCompiled(int* lo_orderdate, int* lo_discount, int*
   for(int batchId = 0; batchId < numBatchesToVisit; batchId++){
     int batchStart = getBatchStart<QImpl>(batchId, batchSize);
     const int limit = (batchStart + batchSize > lo_num_entries) ? lo_num_entries : batchStart + batchSize;
+    
+    int prefetchCursor{0};
+    if constexpr (PrefetchSetting != Prefetch::NONE){
+      prefetchPtrTo<PrefetchSetting>(&lo_orderdate[batchStart + startWithinBatch + (prefetchCursor++)*step]);
+      prefetchPtrTo<PrefetchSetting>(&lo_orderdate[batchStart + startWithinBatch + (prefetchCursor++)*step]);
+      prefetchPtrTo<PrefetchSetting>(&lo_orderdate[batchStart + startWithinBatch + (prefetchCursor++)*step]);
+      prefetchPtrTo<PrefetchSetting>(&lo_orderdate[batchStart + startWithinBatch + (prefetchCursor++)*step]);
+      prefetchPtrTo<PrefetchSetting>(&lo_orderdate[batchStart + startWithinBatch + (prefetchCursor++)*step]);
+      prefetchPtrTo<PrefetchSetting>(&lo_orderdate[batchStart + startWithinBatch + (prefetchCursor++)*step]);
+    }
     for(int i = batchStart + startWithinBatch; i < limit; i += step){
-      if(lo_orderdate[i] >= 19940204 && lo_orderdate[i] <= 19940210 && 
-          lo_quantity[i] >= 26 && lo_quantity[i] <= 35 && 
-          lo_discount[i] >= 5 && lo_discount[i] <= 7){
-        sum += lo_discount[i] * lo_extendedprice[i];
+      if constexpr (PrefetchSetting != Prefetch::NONE){
+        if((prefetchCursor + 1 ) * step < limit){
+          prefetchPtrTo<PrefetchSetting>(&lo_orderdate[batchStart + startWithinBatch + (prefetchCursor++)*step]);
+        }
+      }
+      int orderdate = lo_orderdate[i];
+      if(orderdate > 19940204 && orderdate < 19940210){
+        int quantity = lo_quantity[i];
+        if(quantity >= 26 && quantity <= 35){
+          int discount = lo_discount[i];
+          if(discount >= 5 && discount<= 7){
+            sum += discount * lo_extendedprice[i];
+          }
+        }
       }
     }
   }
@@ -125,7 +145,7 @@ __global__ void DeviceSelectIf(int* lo_orderdate, int* lo_discount, int* lo_quan
 }
 
 
-template<QueryVariant QImpl>
+template<QueryVariant QImpl, Prefetch PrefSetting = Prefetch::NONE>
 float runQuery(int* lo_orderdate, int* lo_discount, int* lo_quantity, int* lo_extendedprice, 
     int lo_num_entries, cub::CachingDeviceAllocator&  g_allocator) {
   SETUP_TIMING();
@@ -150,7 +170,7 @@ float runQuery(int* lo_orderdate, int* lo_discount, int* lo_quantity, int* lo_ex
     const int batchSize = getBatchSizeCompiled<QImpl>();
     const int numBatches = (lo_num_entries + batchSize - 1)/batchSize;
     auto [gridSize, blockSize] = getLaunchConfigCompiled<QImpl>(DeviceSelectIfCompiled<QImpl>, getSMCount(), batchSize, numBatches);
-    TIME_FUNC((DeviceSelectIfCompiled<QImpl><<<gridSize, blockSize>>>(lo_orderdate, 
+    TIME_FUNC((DeviceSelectIfCompiled<QImpl, PrefSetting><<<gridSize, blockSize>>>(lo_orderdate, 
         lo_discount, lo_quantity, lo_extendedprice, lo_num_entries, d_sum, batchSize)), time_query);
   }
 
@@ -247,7 +267,16 @@ int main(int argc, char** argv)
         << ",\"time_query\":" << time_query
         << "}" << endl;
   }
-
+  // cout << "** CompiledBatchToSMPrefL2 TEST **" << endl;
+  // for (int t = 0; t < num_trials; t++) {
+  //   float time_query;
+  //   time_query = runQuery<QueryVariant::CompiledBatchToSM, Prefetch::L2>(d_lo_orderdate, d_lo_discount, d_lo_quantity, d_lo_extendedprice, LO_LEN, g_allocator);
+  //   cout<< "{"
+  //       << "\"type\":CompiledBatchToSMPrefL2" 
+  //       << ",\"query\":13" 
+  //       << ",\"time_query\":" << time_query
+  //       << "}" << endl;
+  // }
   cout << "** CompiledBatchToGPU  TEST **" << endl;
   for (int t = 0; t < num_trials; t++) {
     float time_query;

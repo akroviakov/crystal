@@ -24,16 +24,6 @@ cub::CachingDeviceAllocator  g_allocator(true);  // Caching allocator for device
 
 int externalBatchSize{0};
 
-enum Prefetch {
-  Disable = 0,
-  Enable = 1
-};
-
-
-enum Parallelism {
-  BatchToSM = 0,
-  BatchToGPU = 1
-};
 /*
   OmniSci(HeavyDB) parallelism. https://github.com/heavyai/heavydb/blob/72c90bc290b79dd30240da41c103a00720f6b050/QueryEngine/JoinHashTable/Runtime/HashJoinRuntime.cpp#L779):
   Typical OmniSci BatchToGPU loop example:
@@ -64,7 +54,7 @@ __device__ __forceinline__ int getSMemIndex(int threadId, int pdist, int numColu
     return smemIndex;
 }
 
-template<QueryVariant QImpl, Prefetch ShouldPrefetch=Prefetch::Disable>
+template<QueryVariant QImpl, Prefetch PrefetchSetting=Prefetch::NONE>
 __global__ void QueryKernelCompiled(const int* lo_orderdate, const int* lo_discount, const int* lo_quantity, const int* lo_extendedprice,
     int lo_num_entries, unsigned long long* revenue, const int batchSize, int batchId = -1, int numBatches = 1) {
 
@@ -75,10 +65,30 @@ __global__ void QueryKernelCompiled(const int* lo_orderdate, const int* lo_disco
   for(int batchId = 0; batchId < numBatchesToVisit; batchId++){
     int batchStart = getBatchStart<QImpl>(batchId, batchSize);
     const int limit = (batchStart + batchSize > lo_num_entries) ? lo_num_entries : batchStart + batchSize;
+    int prefetchCursor{0};
+    if constexpr (PrefetchSetting != Prefetch::NONE){
+      prefetchPtrTo<PrefetchSetting>(&lo_orderdate[batchStart + startWithinBatch + (prefetchCursor++)*step]);
+      prefetchPtrTo<PrefetchSetting>(&lo_orderdate[batchStart + startWithinBatch + (prefetchCursor++)*step]);
+      prefetchPtrTo<PrefetchSetting>(&lo_orderdate[batchStart + startWithinBatch + (prefetchCursor++)*step]);
+      prefetchPtrTo<PrefetchSetting>(&lo_orderdate[batchStart + startWithinBatch + (prefetchCursor++)*step]);
+      prefetchPtrTo<PrefetchSetting>(&lo_orderdate[batchStart + startWithinBatch + (prefetchCursor++)*step]);
+      prefetchPtrTo<PrefetchSetting>(&lo_orderdate[batchStart + startWithinBatch + (prefetchCursor++)*step]);
+    }
     for(int i = batchStart + startWithinBatch; i < limit; i += step){
-      if(lo_orderdate[i] > 19930000 && lo_orderdate[i] < 19940000 && 
-          lo_quantity[i] < 25 && lo_discount[i] >= 1 && lo_discount[i] <= 3) {
-        sum += lo_discount[i] * lo_extendedprice[i];
+      if constexpr (PrefetchSetting != Prefetch::NONE){
+        if((prefetchCursor + 1 ) * step < limit){
+          prefetchPtrTo<PrefetchSetting>(&lo_orderdate[batchStart + startWithinBatch + (prefetchCursor++)*step]);
+        }
+      }
+      int orderdate = lo_orderdate[i];
+      if(orderdate > 19930000 && orderdate < 19940000){
+        int quantity = lo_quantity[i];
+        if(lo_quantity[i] < 25 ){
+          int discount = lo_discount[i];
+          if(discount >= 1 && discount <= 3){
+            sum += discount * lo_extendedprice[i];
+          }
+        }
       }
     }
   }
@@ -243,6 +253,7 @@ float runQuery(int* lo_orderdate, int* lo_discount, int* lo_quantity, int* lo_ex
     /* DATA INFO */
     const int batchSize = externalBatchSize ? externalBatchSize : getBatchSizeCompiled<QImpl>();
     const int numBatches = (lo_num_entries + batchSize - 1)/batchSize;
+    cout << "batchSize = " << batchSize << ", numBatches = " << numBatches << "\n";
     /* END DATA INFO */
 
     /* DEVICE INFO */
@@ -258,7 +269,7 @@ float runQuery(int* lo_orderdate, int* lo_discount, int* lo_quantity, int* lo_ex
     // constexpr int elemPerThread{4};
     // Round up according to array size 
     auto [gridSize, blockSize] = getLaunchConfigCompiled<QImpl>(QueryKernelCompiled<QImpl>, getSMCount(), batchSize, numBatches);
-    // cout << "Launch config : <<<" << gridSize << ", " << blockSize << ">>>\n";
+    cout << "Launch config : <<<" << gridSize << ", " << blockSize << ">>>\n";
     QueryKernelCompiled<QImpl><<<gridSize, blockSize>>>(lo_orderdate, 
         lo_discount, lo_quantity, lo_extendedprice, lo_num_entries, d_sum, batchSize);
     // } else {

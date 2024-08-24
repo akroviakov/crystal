@@ -22,6 +22,8 @@ using namespace std;
 bool                    g_verbose = false;  // Whether to display input/output to console
 cub::CachingDeviceAllocator  g_allocator(true);  // Caching allocator for device memory
 
+int externalBatchSize{0};
+
 template<QueryVariant QImpl>
 __global__ void probeCompiled(int* lo_orderdate, int* lo_partkey, int* lo_custkey, int* lo_suppkey, int* lo_revenue, int* lo_supplycost, int lo_len,
     int* ht_p, int p_len,
@@ -318,7 +320,7 @@ float runQuery(int* lo_orderdate, int* lo_custkey, int* lo_partkey, int* lo_supp
 
   int tile_items = 128*4;
   int d_val_min = 19920101;
-  const int batchSize = getBatchSizeCompiled<QImpl>();
+  const int batchSize = externalBatchSize ? externalBatchSize : getBatchSizeCompiled<QImpl>();
   const int numBatches = (lo_len + batchSize - 1)/batchSize;
   if constexpr(QImpl == QueryVariant::Vector || QImpl == QueryVariant::VectorOpt){
     build_hashtable_s<128,4><<<(s_len + tile_items - 1)/tile_items, 128>>>(s_nation, s_suppkey, s_city, s_len, ht_s, s_len);
@@ -403,6 +405,8 @@ int main(int argc, char** argv)
   // Initialize command line
   CommandLineArgs args(argc, argv);
   args.GetCmdLineArgument("t", num_trials);
+  args.GetCmdLineArgument("batchSize", externalBatchSize);
+
   string dataSetPath;
   args.GetCmdLineArgument("dataSetPath", dataSetPath);
 
@@ -478,6 +482,7 @@ int main(int argc, char** argv)
         << "\"type\":Vector" 
         << ",\"query\":43" 
         << ",\"time_query\":" << time_query
+        << ",\"batch_size\":" << externalBatchSize 
         << "}" << endl;
   }
   cout << "** VECTOR-OPT TEST **" << endl;
@@ -494,6 +499,7 @@ int main(int argc, char** argv)
         << "\"type\":VectorOpt" 
         << ",\"query\":43" 
         << ",\"time_query\":" << time_query
+        << ",\"batch_size\":" << externalBatchSize 
         << "}" << endl;
   }
   cout << "** CompiledBatchToSM TEST **" << endl;
@@ -510,6 +516,7 @@ int main(int argc, char** argv)
         << "\"type\":CompiledBatchToSM" 
         << ",\"query\":43" 
         << ",\"time_query\":" << time_query
+        << ",\"batch_size\":" << externalBatchSize 
         << "}" << endl;
   }
   cout << "** CompiledBatchToGPU TEST **" << endl;
@@ -526,6 +533,7 @@ int main(int argc, char** argv)
         << "\"type\":CompiledBatchToGPU" 
         << ",\"query\":43" 
         << ",\"time_query\":" << time_query
+        << ",\"batch_size\":" << externalBatchSize 
         << "}" << endl;
   }
   return 0;

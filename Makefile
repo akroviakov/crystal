@@ -8,7 +8,10 @@ NVCC = nvcc
 SM_TARGETS   = -gencode=arch=compute_$(SM),code=\"sm_$(SM),compute_$(SM)\" 
 SM_DEF     = -DSM$(SM)0
 
-NVCCFLAGS += --std=c++17 --expt-extended-lambda $(SM_DEF) -Xptxas="-dlcm=cg -v" -lineinfo -Xcudafe  -\# 
+# non-caching loads (L1 disabled): -Xptxas -dlcm=cg
+# caching loads (L1 enabled, default): -Xptxas -dlcm=ca
+
+NVCCFLAGS += --std=c++17 --expt-extended-lambda $(SM_DEF) -Xptxas="-v" -lineinfo -Xcudafe  -\# 
 
 SRC = src
 BIN = bin

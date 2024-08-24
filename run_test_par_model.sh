@@ -13,7 +13,7 @@ SCRIPT_DIR=$(dirname "$SCRIPT_PATH")
 
 pushd "src/ssb"
 sed -i "s/#define SF [^ ]*/#define SF $SF/g" ssb_utils.h
-files=("q11.cu")
+files=("q11.cu" "q21.cu" "q43.cu")
 QUERIES=()
 
 for file in "${files[@]}"

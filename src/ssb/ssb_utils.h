@@ -124,7 +124,7 @@ T* loadColumn(string dataSetPath, string col_name, int num_entries) {
   string filename = dataSetPath + DATA_DIR + lookup(col_name);
   ifstream colData (filename.c_str(), ios::in | ios::binary);
   if (!colData) {
-    printf("[loadColumn] No coldata, searched in: %s\n", filename.c_str());
+    printf("[loadColumn] No coldata for \'%s\', searched in: %s\n", col_name.c_str(), filename.c_str());
     return NULL;
   }
 

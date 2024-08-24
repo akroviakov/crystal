@@ -10,31 +10,32 @@ def extract_filename(path):
     return file_name
 
 def plot_execution_time(file, SF):
-    df = pd.read_csv(file)
-    avg_execution_time = df.groupby(['type', 'batch_size'])['executionTime'].mean().reset_index()
-    pivot_df = avg_execution_time.pivot(index='batch_size', columns='type', values='executionTime')
-
-    fig, ax = plt.subplots(figsize=(8, 4))
-    pivot_df.plot(ax=ax,
-        style=['-', '--', '-.'],
-        marker='X',
-        logx=True,
-        logy=True)
-
-    ax.set_xlabel('Batch Size (rows)')
-    ax.set_ylabel('Execution Time (ms)')
-    ax.set_title(f'SSB SF{SF}: Crystal vs Omnisci parallelism')
-    ax.legend(title='Parallelism model',loc='center left', bbox_to_anchor=(1, 0.5))
-
-    ax.grid(True)
-
-    fig.tight_layout()
-    plots_dir=f"Plots/SF_{SF}/Par_Model"
+    plots_dir = f"Plots/SF_{SF}/Par_Model"
     if not os.path.exists(plots_dir):
         os.makedirs(plots_dir)
 
-    fig.savefig(f"{plots_dir}/Comparison_Par_Model_SF_{SF}.png", dpi=300)
-
+    df = pd.read_csv(file)
+    df = df[~df['type'].isin(["Vector", "VectorOpt"])]
+    markers = ["v", "X", "1", "s"]
+    unique_names = df['name'].unique()
+    for name in unique_names:
+        name_df = df[df['name'] == name]
+        avg_execution_time = name_df.groupby(['type', 'batch_size'])['executionTime'].min().reset_index()
+        pivot_df = avg_execution_time.pivot(index='batch_size', columns='type', values='executionTime')
+        fig, ax = plt.subplots(figsize=(3.5, 3))
+        ax = pivot_df.plot(ax=ax,
+                      style=['-', '--', '-.', ':'],
+                      logx=True,
+                      logy=True)
+        for i, line in enumerate(ax.get_lines()):
+            line.set_marker(markers[i])
+        ax.set_xlabel('Batch Size (rows)')
+        ax.set_ylabel('Execution Time (ms)')
+        ax.legend(title='Parallelism model', loc='upper center')
+        ax.grid(True)
+        fig.tight_layout()
+        fig.savefig(f"{plots_dir}/Comparison_Par_Model_{name[:-4]}_SF_{SF}.png", dpi=300)
+        fig.savefig(f"{plots_dir}/Comparison_Par_Model_{name[:-4]}_SF_{SF}.pdf")
 
 
 if __name__ == '__main__':
