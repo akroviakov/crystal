@@ -32,7 +32,8 @@ enum QueryVariant {
   Vector = 0,
   VectorOpt = 1,
   CompiledBatchToSM = 2,
-  CompiledBatchToGPU = 3,
+  CompiledBatchToSMLocals = 3,
+  CompiledBatchToGPU = 4
 };
 
 enum Prefetch {
@@ -77,7 +78,7 @@ int getSMCount() {
 template<QueryVariant QImpl>
 __device__ inline int getStart(const int batchSize) {
   int start;
-  if constexpr (QImpl == QueryVariant::CompiledBatchToSM){
+  if constexpr (QImpl == QueryVariant::CompiledBatchToSM || QImpl == QueryVariant::CompiledBatchToSMLocals){
     start = threadIdx.x; // offset within batch
   } else {
     start = blockIdx.x * blockDim.x + threadIdx.x; // global TID
@@ -88,7 +89,7 @@ __device__ inline int getStart(const int batchSize) {
 template<QueryVariant QImpl>
 __device__ inline int getStep() {
   int step;
-  if constexpr (QImpl == QueryVariant::CompiledBatchToSM){
+  if constexpr (QImpl == QueryVariant::CompiledBatchToSM || QImpl == QueryVariant::CompiledBatchToSMLocals){
     step = blockDim.x;
   } else {
     step = gridDim.x * blockDim.x;
@@ -99,7 +100,7 @@ __device__ inline int getStep() {
 template<QueryVariant QImpl>
 __device__ inline int getNumBatches(const int colLimit, const int batchSize) {
   int numIters;
-  if constexpr (QImpl == QueryVariant::CompiledBatchToSM){
+  if constexpr (QImpl == QueryVariant::CompiledBatchToSM || QImpl == QueryVariant::CompiledBatchToSMLocals){
     numIters = 1; // Scheduler will "schedule" a batch
   } else {
     numIters = (colLimit + batchSize - 1)/batchSize;
@@ -110,7 +111,7 @@ __device__ inline int getNumBatches(const int colLimit, const int batchSize) {
 template<QueryVariant QImpl>
 __device__ inline int getBatchStart(const int batchId, const int batchSize) {
   int batchStart;
-  if constexpr (QImpl == QueryVariant::CompiledBatchToSM){
+  if constexpr (QImpl == QueryVariant::CompiledBatchToSM || QImpl == QueryVariant::CompiledBatchToSMLocals){
     batchStart = blockIdx.x * batchSize; // Scheduler will "schedule" a batch
   } else {
     batchStart = batchId * batchSize;
@@ -132,7 +133,7 @@ __device__ inline int getLimit(const int batchSize, const int start, const int c
 template<QueryVariant QImpl>
 __host__ inline int getBatchSizeCompiled() {
   int batchSize;
-  if constexpr (QImpl == QueryVariant::CompiledBatchToSM){
+  if constexpr (QImpl == QueryVariant::CompiledBatchToSM || QImpl == QueryVariant::CompiledBatchToSMLocals){
     batchSize = 20000;
   } else {
     batchSize = 32'000'000;
@@ -143,7 +144,7 @@ __host__ inline int getBatchSizeCompiled() {
 template<QueryVariant QImpl, class T>
 __host__ inline std::pair<int, int> getLaunchConfigCompiled(T kernel, const int numSMs, const int batchSize, const int numBatches) {
   int gridSize, blockSize;
-  if constexpr (QImpl == QueryVariant::CompiledBatchToSM){
+  if constexpr (QImpl == QueryVariant::CompiledBatchToSM || QImpl == QueryVariant::CompiledBatchToSMLocals){
     gridSize = numBatches;
     blockSize = std::min(batchSize, 1024);
   } else {

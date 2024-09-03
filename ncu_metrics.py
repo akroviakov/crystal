@@ -82,6 +82,8 @@ def get_kernel_type(name):
     elif "(QueryVariant)2" in name:
         resultStr += "CompiledBatchToSM"
     elif "(QueryVariant)3" in name:
+        resultStr += "CompiledBatchToSMLocals"
+    elif "(QueryVariant)4" in name:
         resultStr += "CompiledBatchToGPU"
     else:
         if "build" in name:

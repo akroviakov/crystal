@@ -56,9 +56,18 @@ __device__ __forceinline__ int getSMemIndex(int threadId, int pdist, int numColu
 
 template<QueryVariant QImpl, Prefetch PrefetchSetting=Prefetch::NONE>
 __global__ void QueryKernelCompiled(const int* lo_orderdate, const int* lo_discount, const int* lo_quantity, const int* lo_extendedprice,
-    int lo_num_entries, unsigned long long* revenue, const int batchSize, int batchId = -1, int numBatches = 1) {
+    int lo_num_entries, unsigned long long* revenue, const int batchSize, unsigned long long* locals = nullptr, int batchId = -1, int numBatches = 1) {
 
-  long long sum = 0;
+  unsigned long long sumd;
+  unsigned long long* sum;
+  if constexpr(QImpl == QueryVariant::CompiledBatchToSMLocals){
+    const int globalTID = blockDim.x * blockIdx.x + threadIdx.x; 
+    sum = &locals[globalTID];
+  } else {
+    sum = &sumd;
+  }
+  *sum = 0;
+
   const int startWithinBatch = getStart<QImpl>(batchSize);
   const int step = getStep<QImpl>();
   const int numBatchesToVisit = getNumBatches<QImpl>(lo_num_entries, batchSize); // 1 for QueryVariant::CompiledBatchToSM
@@ -86,76 +95,16 @@ __global__ void QueryKernelCompiled(const int* lo_orderdate, const int* lo_disco
         if(lo_quantity[i] < 25 ){
           int discount = lo_discount[i];
           if(discount >= 1 && discount <= 3){
-            sum += discount * lo_extendedprice[i];
+            *sum += discount * lo_extendedprice[i];
           }
         }
       }
     }
   }
-
-
-  // if constexpr (ParModel == Parallelism::BatchToSM){ // Crystal parallelism
-  //   const int threadsInBlock{blockDim.x};
-  //   const int numRowsPerThread{(batchSize + threadsInBlock - 1) / threadsInBlock};
-  //   const int blockIndex = (batchId == -1) ? blockIdx.x : batchId + blockIdx.x;
-  //   const int batchOffset = blockIndex * batchSize;
-  //   const int numBatches = (lo_num_entries + batchSize - 1) / batchSize;
-  //   const int numBatchRows = (blockIndex == numBatches - 1) ? lo_num_entries - batchOffset : batchSize;
-    
-  //   // Variant with less throughput/transactions: loads only happen when needed
-  //   if constexpr(ShouldPrefetch == Prefetch::Disable){
-  //     for(int i = 0; i < numRowsPerThread; i++){
-  //       const int threadOffsetWithinBlock = threadIdx.x + i * threadsInBlock;
-  //       if(threadOffsetWithinBlock < numBatchRows){
-  //         const int offset = batchOffset + threadOffsetWithinBlock;
-  //         int orderdate = lo_orderdate[offset];
-  //         if(orderdate > 19930000 && orderdate < 19940000){
-  //           int quantity = lo_quantity[offset];
-  //           if(quantity < 25){
-  //             int discount = lo_discount[offset];
-  //             if(discount >= 1 && discount <= 3){
-  //               sum += discount * lo_extendedprice[offset];
-  //             }
-  //           }
-  //         }
-  //       }
-  //     }
-  //   }
-  //   if constexpr(ShouldPrefetch == Prefetch::Enable){
-  //     constexpr int numCols{1};
-  //     constexpr int PDIST{10};
-  //     __shared__ int orderDate[numCols * PDIST* 1024];
-  //     int k{0};
-  //     for (k=0; k<PDIST; ++k) { 
-  //       orderDate[getSMemIndex(threadIdx.x, PDIST, numCols, 0, k)] = noncached_read(&lo_orderdate[batchOffset + threadIdx.x + k * threadsInBlock]);
-  //       // orderDate[getSMemIndex(threadIdx.x, PDIST, numCols, 1, k)] = noncached_read(&lo_quantity[batchOffset + threadIdx.x + k * threadsInBlock]);
-  //     }
-  //     for (int i = 0; i < numRowsPerThread; i++, k++) {
-  //       int ctr_mod= i%PDIST;
-  //       int orderdate = orderDate[getSMemIndex(threadIdx.x, PDIST, numCols, 0, ctr_mod)];
-  //       // int quantity = orderDate[getSMemIndex(threadIdx.x, PDIST, numCols, 1, ctr_mod)];
-  //       if(k < numRowsPerThread){
-  //         orderDate[getSMemIndex(threadIdx.x, PDIST, numCols, 0, ctr_mod)] = noncached_read(&lo_orderdate[batchOffset + threadIdx.x + k * threadsInBlock]);
-  //         // orderDate[getSMemIndex(threadIdx.x, PDIST, numCols, 1, ctr_mod)] = noncached_read(&lo_quantity[batchOffset + threadIdx.x + k * threadsInBlock]);
-  //       }
-  //       const int localIndex = threadIdx.x + i * threadsInBlock;
-  //       if(localIndex < numBatchRows){
-  //         int offset = batchOffset + localIndex;
-  //         if (orderdate > 19930000 && orderdate < 19940000){
-  //           const int discount = noncached_read(&lo_discount[offset]);
-  //           if (noncached_read(&lo_quantity[offset]) < 25 && discount >= 1 && discount <= 3) {
-  //             sum += static_cast<unsigned long long>(discount) * noncached_read(&lo_extendedprice[offset]);
-  //           }
-  //         }
-  //       }
-  //     }
-  //   }
-  // } 
-  // 
   __syncthreads();
   static __shared__ long long buffer[32];
-  unsigned long long aggregate = BlockSum<long long>(sum, (long long*)buffer);
-  __syncthreads();
+  unsigned long long aggregate = BlockSum<long long>(*sum, (long long*)buffer);
+  __syncthreads(); 
   if (threadIdx.x == 0) {
     atomicAdd(revenue, aggregate);
   }
@@ -169,7 +118,7 @@ __global__ void QueryKernel(int* lo_orderdate, int* lo_discount, int* lo_quantit
   int selection_flags[ITEMS_PER_THREAD];
   int items2[ITEMS_PER_THREAD];
 
-  long long sum = 0;
+  unsigned long long sum = 0;
 
   int tile_offset = blockIdx.x * TILE_SIZE;
   int num_tiles = (lo_num_entries + TILE_SIZE - 1) / TILE_SIZE;
@@ -241,7 +190,7 @@ float runQuery(int* lo_orderdate, int* lo_discount, int* lo_quantity, int* lo_ex
   cudaMemset(d_sum, 0, sizeof(long long));
 
   // Run
-
+  unsigned long long* locals;
   if constexpr(QImpl == QueryVariant::Vector || QImpl == QueryVariant::VectorOpt){
     constexpr int numThreads{128};
     constexpr int elemPerThread = 4;
@@ -270,8 +219,12 @@ float runQuery(int* lo_orderdate, int* lo_discount, int* lo_quantity, int* lo_ex
     // Round up according to array size 
     auto [gridSize, blockSize] = getLaunchConfigCompiled<QImpl>(QueryKernelCompiled<QImpl>, getSMCount(), batchSize, numBatches);
     cout << "Launch config : <<<" << gridSize << ", " << blockSize << ">>>\n";
-    QueryKernelCompiled<QImpl><<<gridSize, blockSize>>>(lo_orderdate, 
-        lo_discount, lo_quantity, lo_extendedprice, lo_num_entries, d_sum, batchSize);
+
+    if constexpr(QImpl == QueryVariant::CompiledBatchToSMLocals){
+      CubDebugExit(g_allocator.DeviceAllocate((void**)&locals, gridSize*blockSize*sizeof(unsigned long long)));
+    } 
+    QueryKernelCompiled<QImpl><<<gridSize, blockSize>>>(lo_orderdate, lo_discount, lo_quantity, lo_extendedprice, lo_num_entries, d_sum, batchSize, locals);
+
     // } else {
     //   int batchId{0};
     //   constexpr int scheduleFactor{4};
@@ -288,7 +241,9 @@ float runQuery(int* lo_orderdate, int* lo_discount, int* lo_quantity, int* lo_ex
   cudaEventRecord(stop, 0);
   cudaEventSynchronize(stop);
   cudaEventElapsedTime(&time_query, start,stop);
-
+  if constexpr(QImpl == QueryVariant::CompiledBatchToSMLocals){
+    CLEANUP(locals);
+  }
   unsigned long long revenue;
   CubDebugExit(cudaMemcpy(&revenue, d_sum, sizeof(long long), cudaMemcpyDeviceToHost));
 
@@ -348,30 +303,6 @@ int main(int argc, char** argv)
 
   cout << "** LOADED DATA TO GPU **" << endl;
 
-  // cout << "** COMPILED MULTI TEST **" << endl;
-  // for (int t = 0; t < num_trials+1; t++) {
-  //   float time_query;
-  //   time_query = runQuery<QueryVariant::Compiled_Multi>(d_lo_orderdate, d_lo_discount, d_lo_quantity, d_lo_extendedprice, LO_LEN, g_allocator);
-  //   cout<< "{"
-  //       << "\"type\":comp_multi" 
-  //       << ",\"query\":11" 
-  //       << ",\"time_query\":" << time_query
-  //       << ",\"batch_size\":" << batchSize
-  //       << "}" << endl;
-  // }
-
-  // cout << "** COMPILED MULTI TEST (OMNISCI) **" << endl;
-  // for (int t = 0; t < num_trials+1; t++) {
-  //   float time_query;
-  //   time_query = runQuery<QueryVariant::Compiled_Multi, Parallelism::BatchToGPU>(d_lo_orderdate, d_lo_discount, d_lo_quantity, d_lo_extendedprice, LO_LEN, g_allocator);
-  //   cout<< "{"
-  //       << "\"type\":comp_multi_omnisci" 
-  //       << ",\"query\":11" 
-  //       << ",\"time_query\":" << time_query
-  //       << ",\"batch_size\":" << batchSize
-  //       << "}" << endl;
-  // }
-
   cout << "** VECTOR TEST **" << endl;
   for (int t = 0; t < num_trials+1; t++) {
     float time_query;
@@ -405,6 +336,17 @@ int main(int argc, char** argv)
         << ",\"batch_size\":" << externalBatchSize
         << "}" << endl;
   }
+  // cout << "** CompiledBatchToSMLocals TEST **" << endl;
+  // for (int t = 0; t < num_trials; t++) {
+  //   float time_query;
+  //   time_query = runQuery<QueryVariant::CompiledBatchToSMLocals>(d_lo_orderdate, d_lo_discount, d_lo_quantity, d_lo_extendedprice, LO_LEN, g_allocator);
+  //   cout<< "{"
+  //       << "\"type\":CompiledBatchToSMLocals" 
+  //       << ",\"query\":11" 
+  //       << ",\"time_query\":" << time_query
+  //       << ",\"batch_size\":" << externalBatchSize
+  //       << "}" << endl;
+  // }
 
   cout << "** CompiledBatchToGPU TEST **" << endl;
   for (int t = 0; t < num_trials; t++) {

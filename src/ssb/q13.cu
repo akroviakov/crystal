@@ -24,8 +24,17 @@ cub::CachingDeviceAllocator  g_allocator(true);  // Caching allocator for device
 
 template<QueryVariant QImpl, Prefetch PrefetchSetting = Prefetch::NONE>
 __global__ void DeviceSelectIfCompiled(int* lo_orderdate, int* lo_discount, int* lo_quantity, int* lo_extendedprice,
-    int lo_num_entries, unsigned long long* revenue, int batchSize) {
-  long long sum = 0;
+    int lo_num_entries, unsigned long long* revenue, int batchSize, unsigned long long* locals = nullptr) {
+  unsigned long long sumd;
+  unsigned long long* sum;
+  if constexpr(QImpl == QueryVariant::CompiledBatchToSMLocals){
+    const int globalTID = blockDim.x * blockIdx.x + threadIdx.x; 
+    sum = &locals[globalTID];
+  } else {
+    sum = &sumd;
+  }
+  *sum = 0;
+
   const int startWithinBatch = getStart<QImpl>(batchSize);
   const int step = getStep<QImpl>();
   const int numBatchesToVisit = getNumBatches<QImpl>(lo_num_entries, batchSize); // 1 for QueryVariant::CompiledBatchToSM
@@ -54,7 +63,7 @@ __global__ void DeviceSelectIfCompiled(int* lo_orderdate, int* lo_discount, int*
         if(quantity >= 26 && quantity <= 35){
           int discount = lo_discount[i];
           if(discount >= 5 && discount<= 7){
-            sum += discount * lo_extendedprice[i];
+            *sum += discount * lo_extendedprice[i];
           }
         }
       }
@@ -62,7 +71,7 @@ __global__ void DeviceSelectIfCompiled(int* lo_orderdate, int* lo_discount, int*
   }
   __syncthreads();
   static __shared__ long long buffer[32];
-  unsigned long long aggregate = BlockSum<long long>(sum, (long long*)buffer);
+  unsigned long long aggregate = BlockSum<long long>(*sum, (long long*)buffer);
   __syncthreads();
   if (threadIdx.x == 0) {
     atomicAdd(revenue, aggregate);
@@ -77,7 +86,7 @@ __global__ void DeviceSelectIf(int* lo_orderdate, int* lo_discount, int* lo_quan
   int selection_flags[ITEMS_PER_THREAD];
   int items2[ITEMS_PER_THREAD];
 
-  long long sum = 0;
+  unsigned long long sum = 0;
 
   int tile_offset = blockIdx.x * TILE_SIZE;
   int num_tiles = (lo_num_entries + TILE_SIZE - 1) / TILE_SIZE;
@@ -160,6 +169,7 @@ float runQuery(int* lo_orderdate, int* lo_discount, int* lo_quantity, int* lo_ex
   CubDebugExit(g_allocator.DeviceAllocate((void**)&d_sum, sizeof(long long)));
 
   cudaMemset(d_sum, 0, sizeof(long long));
+  unsigned long long* locals;
 
   // Run
   if constexpr(QImpl == QueryVariant::Vector || QImpl == QueryVariant::VectorOpt){
@@ -170,14 +180,20 @@ float runQuery(int* lo_orderdate, int* lo_discount, int* lo_quantity, int* lo_ex
     const int batchSize = getBatchSizeCompiled<QImpl>();
     const int numBatches = (lo_num_entries + batchSize - 1)/batchSize;
     auto [gridSize, blockSize] = getLaunchConfigCompiled<QImpl>(DeviceSelectIfCompiled<QImpl>, getSMCount(), batchSize, numBatches);
+    if constexpr(QImpl == QueryVariant::CompiledBatchToSMLocals){
+      std::cerr << "WOW\n";
+      CubDebugExit(g_allocator.DeviceAllocate((void**)&locals, gridSize*blockSize*sizeof(unsigned long long)));
+    } 
     TIME_FUNC((DeviceSelectIfCompiled<QImpl, PrefSetting><<<gridSize, blockSize>>>(lo_orderdate, 
-        lo_discount, lo_quantity, lo_extendedprice, lo_num_entries, d_sum, batchSize)), time_query);
+        lo_discount, lo_quantity, lo_extendedprice, lo_num_entries, d_sum, batchSize, locals)), time_query);
   }
 
   cudaEventRecord(stop, 0);
   cudaEventSynchronize(stop);
   cudaEventElapsedTime(&time_query, start,stop);
-
+  if constexpr(QImpl == QueryVariant::CompiledBatchToSMLocals){
+    CLEANUP(locals);
+  }
   unsigned long long revenue;
   CubDebugExit(cudaMemcpy(&revenue, d_sum, sizeof(long long), cudaMemcpyDeviceToHost));
 
@@ -273,6 +289,17 @@ int main(int argc, char** argv)
   //   time_query = runQuery<QueryVariant::CompiledBatchToSM, Prefetch::L2>(d_lo_orderdate, d_lo_discount, d_lo_quantity, d_lo_extendedprice, LO_LEN, g_allocator);
   //   cout<< "{"
   //       << "\"type\":CompiledBatchToSMPrefL2" 
+  //       << ",\"query\":13" 
+  //       << ",\"time_query\":" << time_query
+  //       << "}" << endl;
+  // }
+
+  // cout << "** CompiledBatchToSMPrefLocals TEST **" << endl;
+  // for (int t = 0; t < num_trials; t++) {
+  //   float time_query;
+  //   time_query = runQuery<QueryVariant::CompiledBatchToSMLocals>(d_lo_orderdate, d_lo_discount, d_lo_quantity, d_lo_extendedprice, LO_LEN, g_allocator);
+  //   cout<< "{"
+  //       << "\"type\":CompiledBatchToSMLocals" 
   //       << ",\"query\":13" 
   //       << ",\"time_query\":" << time_query
   //       << "}" << endl;
