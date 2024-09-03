@@ -10,6 +10,12 @@ import plot_vec_comp
 import ncu_metrics
 import plot_par_model_comp
 
+# When running the first time: 
+# python3 run_tests.py --data-dir=/SOMEPATH/crystal/test/ssb/data/ --sf=10 --mode=PROFILE --create-dataset=TRUE
+
+# Afterwards (--mode is optional): 
+# python3 run_tests.py --data-dir=/SOMEPATH/crystal/test/ssb/data/ --sf=10 --mode=PROFILE
+
 def run_command(command, cwd=None, stdout=None):
     """Run a shell command and capture its output."""
     print(f"Running command: {command}")
@@ -34,9 +40,12 @@ def convertCrystalStdOutToCSV(raw_output_file, csv_output_file):
                 query = re.search(r'(?<="query":)\d+', line)
                 time_query = re.search(r'(?<="time_query":)[\d.]+', line)
                 batch_size = re.search(r'(?<="batch_size":)[\d.]+', line)
-                
-                if all([type_, query, time_query, batch_size]):
-                    outfile.write(f"{type_.group()},q{query.group()}.sql,{time_query.group()},{batch_size.group()}\n")
+
+                if all([type_, query, time_query]):
+                    if(batch_size):
+                        outfile.write(f"{type_.group()},q{query.group()}.sql,{time_query.group()},{batch_size.group()}\n")
+                    else:
+                        outfile.write(f"{type_.group()},q{query.group()}.sql,{time_query.group()},0\n")
 
 def compileFromList(original_script_dir, cu_files):
     queries = []
@@ -127,16 +136,17 @@ if __name__ == "__main__":
     if args.create_dataset:
         print("Creating Dataset")
         os.chdir(os.path.join(script_dir, "test"))
+        run_command("cd ssb/dbgen && make && cd ../loader && make && cd ../../")
+        run_command(f"python3 util.py ssb {args.sf} gen")
         run_command(f"python3 util.py ssb {args.sf} transform")
         os.chdir(script_dir)
 
-
-    # Handle SF
     run_command("make clean && make")
 
     ssb_dir = os.path.join(script_dir, "src/ssb")
     os.chdir(ssb_dir)
-
+    all_queries=["q11.cu", "q12.cu", "q13.cu", "q21.cu", "q22.cu", "q23.cu", "q31.cu", "q32.cu","q33.cu","q34.cu","q41.cu","q42.cu","q43.cu"]
+    selected_queries=["q11.cu", "q12.cu", "q13.cu", "q21.cu", "q31.cu", "q43.cu"]
     run_command(f"sed -i 's/#define SF [^ ]*/#define SF {args.sf}/g' ssb_utils.h")
-    runOneShotTest(script_dir, args, ["q11.cu", "q12.cu", "q13.cu", "q21.cu", "q31.cu", "q43.cu"])
+    runOneShotTest(script_dir, args, all_queries)
     runParallelismModelTest(script_dir, args, ["q11.cu", "q21.cu", "q43.cu"])

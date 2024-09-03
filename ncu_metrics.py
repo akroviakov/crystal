@@ -32,11 +32,11 @@ metricToSemantics = {
     "l1tex__t_output_wavefronts_pipe_lsu_mem_global_op_ld.sum" : "Number of warps that hit L1",
 
     "smsp__cycles_active.avg.pct_of_peak_sustained_elapsed" : "Efficiency: Pct of cycles with any work to do",
-    "smsp__warp_issue_stalled_long_scoreboard_per_warp_active.pct" : "Memory stalls of all stalls",
+    "smsp__warp_issue_stalled_long_scoreboard_per_warp_active.pct" : "Memory stalls",
     "smsp__warps_issue_stalled_long_scoreboard.avg" : "long_scoreboard stalls",
     "smsp__average_warp_latency_per_inst_issued.ratio" : "Instruction latency",
     "smsp__warps_eligible.avg.per_cycle_active" : "Avg num. of eligible warps per cycle",
-    "smsp__inst_executed.sum" : "Num. executed instructions",
+    "smsp__inst_executed.sum" : "Executed instructions",
     "smsp__warps_issue_stalled_lg_throttle.avg" : "LSU not available (Avg)",
     "smsp__warps_launched.sum" : "Num. launched warps",
 
@@ -195,7 +195,19 @@ def plot_metric(file_path, SF):
 def plot_parallelism_comparison(file_path, SF):
     df = readPreprocess(file_path)
     pivot_df = hitRate(df, ("L2 hits", "sector") , ("L2 misses", "sector"), ("L2 hit rate", "%"))
-    pivot_df = pivot_df[["Total DRAM traffic", "Num. executed instructions", "Writeback active (of peak)", "L2 hit rate", "L2 -> L1 (of peak)", "long_scoreboard stalls", "Memory stalls of all stalls", "Instruction latency"]]
+    pivot_df = pivot_df[["Total DRAM traffic", "Executed instructions", "Writeback active (of peak)", "L2 hit rate", "L2 -> L1 (of peak)", "long_scoreboard stalls", "Memory stalls", "Instruction latency"]]
+    conversion_map = {
+        'Gbyte': 1024**3, 
+        'Mbyte': 1024**2,  
+        'Kbyte': 1024   
+    }
+    for metric_unit in conversion_map:
+        column = ('Total DRAM traffic', metric_unit)
+        if column in pivot_df.columns:
+            pivot_df[('Total DRAM traffic', 'Byte')] = pivot_df.get(('Total DRAM traffic', 'Byte'), 0) + pivot_df[column].fillna(0) * conversion_map[metric_unit]
+    columns_to_drop = [(('Total DRAM traffic', metric)) for metric in conversion_map.keys() if ('Total DRAM traffic', metric) in pivot_df.columns]
+    pivot_df = pivot_df.drop(columns=columns_to_drop)
+    pivot_df = pivot_df[[col for col in [('Total DRAM traffic', 'Byte')] + [c for c in pivot_df.columns if c != ('Total DRAM traffic', 'Byte')]]]
 
     pivot_df = pivot_df.applymap(lambda x: np.ceil(x) if isinstance(x, (float, np.float64)) else x)
     pivot_df.columns = [f'{col[0]}({col[1]})' if col[1] else col[0] for col in pivot_df.columns]
@@ -209,7 +221,7 @@ def plot_parallelism_comparison(file_path, SF):
 
     color_rgba = {color: mcolors.to_rgba(color) for color in color_list}
     color_to_hatch = dict(zip(color_rgba.values(), hatch_patterns))
-    print(pivot_df_unindexed)
+    # print(pivot_df_unindexed)
     ncols = len(metric_columns) // 2 
     fig, axes = plt.subplots(nrows=2, ncols=ncols, figsize=(10, 5))
     axes =  axes.flatten()
@@ -235,8 +247,8 @@ def plot_parallelism_comparison(file_path, SF):
     plots_dir=f"Plots/SF_{SF}/Metrics"
     if not os.path.exists(plots_dir):
         os.makedirs(plots_dir)
-    fig.savefig(f"{plots_dir}/Comparison_for_ParModel_{extract_filename(file_path)}.png", dpi=300)
-    fig.savefig(f"{plots_dir}/Comparison_for_ParModel_{extract_filename(file_path)}.pdf")
+    fig.savefig(f"{plots_dir}/Comparison_for_{extract_filename(file_path)}.png", dpi=300)
+    fig.savefig(f"{plots_dir}/Comparison_for_{extract_filename(file_path)}.pdf")
 
 
 if __name__ == '__main__':

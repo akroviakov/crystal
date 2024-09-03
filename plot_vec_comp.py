@@ -21,7 +21,6 @@ def plot_execution_times(file, SF):
 
     df = pd.read_csv(file)
     df['name'] = df['name'].str[:-4] 
-
     median_execution_times = df.groupby(['name', 'type'])['executionTime'].median().unstack()
     proportions = median_execution_times.div(median_execution_times.max(axis=1), axis=0) * 100
 
@@ -33,7 +32,7 @@ def plot_execution_times(file, SF):
             column = container.get_label()
             original_value = median_execution_times.loc[name, column]
             bar.set_hatch(color_to_hatch[bar.get_facecolor()]) #hatch_patterns[i % len(hatch_patterns)])
-            ax.annotate(f'{original_value:.1f}', 
+            ax.annotate(f'{original_value:.2f}', 
                         (bar.get_x() + bar.get_width() / 2., bar.get_height()), 
                         ha='center', va='center', 
                         xytext=(0, 4), 
@@ -103,8 +102,8 @@ def plot_execution_times(file, SF):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Process some integers.')
-    parser.add_argument('SF', metavar='SF', type=int, help='scale factor')
     parser.add_argument('CSV', metavar='CSV', type=str, help='csv path')
+    parser.add_argument('SF', metavar='SF', type=int, help='scale factor')
 
     args = parser.parse_args()
     current_dir = os.path.dirname(os.path.abspath(__file__))

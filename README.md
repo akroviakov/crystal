@@ -1,5 +1,31 @@
-Crystal GPU Library
+Crystal GPU Library (extended)
 =================
+This is an extention built on top of the original Crystal library (description below) and [Crystal-opt](https://github.com/jiashenC/crystal-opt).
+
+The extention includes the following:
+- "Compiled" version of queries.
+- Two parallelisation models for compiled queries: `Batch-to-GPU` and `Batch-to-SM`. 
+- Prefetching, streaming handles for `int` values in device code.
+- Plots for comparing parallelisation models and selected metrics gathered from `ncu`.
+
+Usage (extended)
+----
+Example to create ssb dataset, run all queries and plot metrics:
+```
+python3 run_tests.py --data-dir=/home/user/TUM/crystal/test/ssb/data/ --sf=10 --mode=PROFILE --create-dataset=/home/user/TUM/crystal/test/ssb/
+```
+
+Example to run all queries and plot metrics:
+```
+python3 run_tests.py --data-dir=/home/user/TUM/crystal/test/ssb/data/ --sf=10 --mode=PROFILE
+```
+
+Example to run all queries and skip metrics:
+```
+python3 run_tests.py --data-dir=/home/user/TUM/crystal/test/ssb/data/ --sf=10
+```
+
+__________________________________________
 
 The Crystal library implements a collection of block-wide device functions that can be used to implement high performance implementations of SQL queries on GPUs.
 

@@ -2,6 +2,7 @@
 *bin/*
 *cub/*
 *test/*
+*/Plots/*
 *.csv
 *.txt
 Makefile
