@@ -114,7 +114,7 @@ def runParallelismModelTest(original_script_dir, args, cu_files):
 
     for q in queries:
         for batch_size in batch_sizes:
-            simple_run_command = f"./bin/ssb/{q} --batchSize={batch_size} --dataSetPath={args.data_dir}"
+            simple_run_command = f"./bin/ssb/{q} --batchSize={batch_size} --t=15 --dataSetPath={args.data_dir}"
             runQueryAndAppendOutput(simple_run_command, raw_output_file)
     convertCrystalStdOutToCSV(raw_output_file, csv_output_file)
 
@@ -149,4 +149,4 @@ if __name__ == "__main__":
     selected_queries=["q11.cu", "q12.cu", "q13.cu", "q21.cu", "q31.cu", "q43.cu"]
     run_command(f"sed -i 's/#define SF [^ ]*/#define SF {args.sf}/g' ssb_utils.h")
     runOneShotTest(script_dir, args, all_queries)
-    runParallelismModelTest(script_dir, args, ["q11.cu", "q21.cu", "q43.cu"])
+    # runParallelismModelTest(script_dir, args, ["q11.cu", "q21.cu", "q43.cu"])

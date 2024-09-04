@@ -19,25 +19,26 @@ metricToSemantics = {
     "lts__t_sectors.avg.pct_of_peak_sustained_elapsed" : "L2 requests (of peak)",
     "lts__t_sectors_lookup_hit.sum" : "L2 hits",
     "lts__t_sectors_lookup_miss.sum" : "L2 misses",
-    "lts__t_sectors_srcunit_tex_op_read.sum.per_second" : "L2 -> L1 sectors (per second)",
+    "lts__t_sector_hit_rate.pct" : "L2 hit rate",
+    "lts__t_sectors_srcunit_tex_op_read.sum.per_second" : "L2->L1 sectors (per second)",
 
-    "l1tex__m_xbar2l1tex_read_sectors_mem_lg_op_ld.sum.pct_of_peak_sustained_elapsed" : "L2 -> L1 (of peak)",
-    "l1tex__m_xbar2l1tex_read_sectors_mem_lg_op_ld.sum" : "L2 -> L1 sectors",
-    "l1tex__lsu_writeback_active_mem_lg.sum.pct_of_peak_sustained_elapsed" : "Writeback active (of peak)",
-    "l1tex__lsu_writeback_active_mem_lg.sum" : "Writeback interface active",
+    "l1tex__m_xbar2l1tex_read_sectors_mem_lg_op_ld.sum.pct_of_peak_sustained_elapsed" : "L2->L1 bandwidth(of peak)",
+    "l1tex__m_xbar2l1tex_read_sectors_mem_lg_op_ld.sum" : "L2->L1 sectors",
+    "l1tex__lsu_writeback_active_mem_lg.sum.pct_of_peak_sustained_elapsed" : "L1 utilization (of peak)",
+    "l1tex__t_sector_hit_rate.pct" : "L1 hit rate",
     "l1tex__t_sectors_pipe_lsu_mem_global_op_ld.sum" : "L1 sectors loaded",
     "l1tex__t_requests_pipe_lsu_mem_global_op_ld.sum" : "L1 load requests",
     "l1tex__t_sectors_pipe_lsu_mem_global_op_st.sum" : "L1 sectors written",
     "l1tex__t_requests_pipe_lsu_mem_global_op_st.sum" : "L1 store requests",
-    "l1tex__t_output_wavefronts_pipe_lsu_mem_global_op_ld.sum" : "Number of warps that hit L1",
+    "l1tex__t_output_wavefronts_pipe_lsu_mem_global_op_ld.sum" : "Num. warps hit L1",
 
-    "smsp__cycles_active.avg.pct_of_peak_sustained_elapsed" : "Efficiency: Pct of cycles with any work to do",
-    "smsp__warp_issue_stalled_long_scoreboard_per_warp_active.pct" : "Memory stalls",
-    "smsp__warps_issue_stalled_long_scoreboard.avg" : "long_scoreboard stalls",
+    "smsp__cycles_active.avg.pct_of_peak_sustained_elapsed" : "Cycles with work",
+    "smsp__warp_issue_stalled_long_scoreboard_per_warp_active.pct" : "Global memory stalls",
+    "smsp__warps_issue_stalled_long_scoreboard.avg" : "Global memory stalls ", #total
     "smsp__average_warp_latency_per_inst_issued.ratio" : "Instruction latency",
-    "smsp__warps_eligible.avg.per_cycle_active" : "Avg num. of eligible warps per cycle",
+    "smsp__warps_eligible.avg.per_cycle_active" : "Eligible warps per cycle",
     "smsp__inst_executed.sum" : "Executed instructions",
-    "smsp__warps_issue_stalled_lg_throttle.avg" : "LSU not available (Avg)",
+    "smsp__warps_issue_stalled_lg_throttle.avg" : "LSU throttle stalls",
     "smsp__warps_launched.sum" : "Num. launched warps",
 
     "dram__bytes_read.sum.per_second" : "Read throughput",
@@ -196,8 +197,8 @@ def plot_metric(file_path, SF):
 
 def plot_parallelism_comparison(file_path, SF):
     df = readPreprocess(file_path)
-    pivot_df = hitRate(df, ("L2 hits", "sector") , ("L2 misses", "sector"), ("L2 hit rate", "%"))
-    pivot_df = pivot_df[["Total DRAM traffic", "Executed instructions", "Writeback active (of peak)", "L2 hit rate", "L2 -> L1 (of peak)", "long_scoreboard stalls", "Memory stalls", "Instruction latency"]]
+    # pivot_df = hitRate(df, ("L2 hits", "sector") , ("L2 misses", "sector"), ("L2 hit rate", "%"))
+    pivot_df = df[["Total DRAM traffic", "Executed instructions", "L2->L1 bandwidth(of peak)", "L2 hit rate",  "LSU throttle stalls", "Global memory stalls ", "Global memory stalls", "Instruction latency"]]
     conversion_map = {
         'Gbyte': 1024**3, 
         'Mbyte': 1024**2,  
