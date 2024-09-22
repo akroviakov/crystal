@@ -11,7 +11,7 @@ def extract_filename(path):
     return file_name
 
 def plot_execution_times(file, SF):
-    colors = ['b', 'r', 'g', 'y', 'c', 'm']
+    colors = ['#0072B2', '#D55E00', '#56B4E9', '#009E73', '#F0E442', '#E69F00', '#CC79A7', '#000000']
     # grayscale_colors = ['lightgray', 'dimgray', 'gray', 'darkgray', 'black']
     # colors = ['#e0e0e0', '#a0a0a0', '#707070', '#404040', '#101010']
 

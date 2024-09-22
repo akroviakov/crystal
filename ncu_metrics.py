@@ -51,7 +51,7 @@ metricToSemantics = {
 }
 
 hatch_patterns = ['\\', '-', '+', 'x', 'o', 'O', '.', '*']
-color_list = ['b', 'r', 'g', 'y', 'c', 'm']
+color_list = ['#0072B2', '#D55E00', '#56B4E9', '#009E73', '#F0E442', '#E69F00', '#CC79A7', '#000000']
 
 def convertMetrics(metric_name):
     found = metricToSemantics.get(metric_name)
