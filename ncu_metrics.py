@@ -228,7 +228,7 @@ def reduceGBPerSUnits(dataframe, column_name):
     dataframe = dataframe[[col for col in [(column_name, 'Byte/s')] + [c for c in dataframe.columns if c != (column_name, 'Byte/s')]]]
     return dataframe
 
-def plot_parallelism_comparison(file_path, SF):
+def plot_parallelism_comparison(file_path, SF, reduced_plot=False):
     df = readPreprocess(file_path)
     # pivot_df = hitRate(df, ("L2 hits", "sector") , ("L2 misses", "sector"), ("L2 hit rate", "%"))
     pivot_df = df[["Total DRAM traffic", "Read throughput of peak", "Executed instructions",  "Instruction latency",
@@ -257,6 +257,8 @@ def plot_parallelism_comparison(file_path, SF):
             ax = axes[rowIdx * ncols + colIdx]
             subset = pivot_df_unindexed[pivot_df_unindexed['ShortName'] == kernel_name]
             pivot_plot_df = subset.pivot(index='ShortName', columns='Type', values=metric)
+            if reduced_plot:
+                pivot_plot_df = pivot_plot_df[["CompiledBatchToSM", "VectorizedOpt"]]
             pivot_plot_df.plot(kind='bar', color=color_list[:len(pivot_plot_df.columns)], ax=ax, edgecolor='black', legend=False, zorder=2, width=0.6)
             for i, bar in enumerate(ax.patches):
                 bar.set_hatch(color_to_hatch[bar.get_facecolor()]) 
@@ -274,8 +276,11 @@ def plot_parallelism_comparison(file_path, SF):
     plots_dir=f"Plots/SF_{SF}/Metrics"
     if not os.path.exists(plots_dir):
         os.makedirs(plots_dir)
-    fig.savefig(f"{plots_dir}/Comparison_for_{extract_filename(file_path)}.png", dpi=300)
-    fig.savefig(f"{plots_dir}/Comparison_for_{extract_filename(file_path)}.pdf")
+    suffix = ""
+    if reduced_plot:
+        suffix = "_reduced"
+    fig.savefig(f"{plots_dir}/Comparison_for_{extract_filename(file_path)}{suffix}.png", dpi=300)
+    fig.savefig(f"{plots_dir}/Comparison_for_{extract_filename(file_path)}{suffix}.pdf")
 
 
 if __name__ == '__main__':
@@ -287,3 +292,5 @@ if __name__ == '__main__':
     for p in glob.glob(f"{args.CSV_DIR}/*.csv"):
         # plot_metric(p, args.SF)
         plot_parallelism_comparison(p, args.SF)
+        plot_parallelism_comparison(p, args.SF, True)
+
