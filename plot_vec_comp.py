@@ -10,7 +10,7 @@ def extract_filename(path):
     file_name = os.path.splitext(base_name)[0]
     return file_name
 
-def plot_execution_times(file, SF, reduced_plot=False):
+def plot_execution_times(file, SF, reduced_plot=False, crystal_only=False, best_vec_comp=False):
     colors = ['#0072B2', '#D55E00', '#56B4E9', '#009E73', '#F0E442', '#E69F00', '#CC79A7', '#000000']
     # grayscale_colors = ['lightgray', 'dimgray', 'gray', 'darkgray', 'black']
     # colors = ['#e0e0e0', '#a0a0a0', '#707070', '#404040', '#101010']
@@ -22,9 +22,11 @@ def plot_execution_times(file, SF, reduced_plot=False):
     df = pd.read_csv(file)
     df['name'] = df['name'].str[:-4] 
     median_execution_times = df.groupby(['name', 'type'])['executionTime'].median().unstack()
-    proportions = median_execution_times.div(median_execution_times.max(axis=1), axis=0) * 100
     if reduced_plot:
-        proportions = proportions[["CompiledBatchToSM", "VectorOpt"]]
+        median_execution_times = median_execution_times[["CompiledBatchToSM", "VectorOpt"]]
+    elif crystal_only:
+        median_execution_times = median_execution_times[["Vector", "VectorOpt"]]
+    proportions = median_execution_times.div(median_execution_times.max(axis=1), axis=0) * 100
     fig, ax = plt.subplots(figsize=(8, 4))
     bars = proportions.plot(kind='bar', ax=ax, color=colors[:len(proportions.columns)], edgecolor='black', zorder=2, width=0.75)
     for container in bars.containers:
@@ -56,6 +58,8 @@ def plot_execution_times(file, SF, reduced_plot=False):
     suffix = ""
     if reduced_plot:
         suffix = "_reduced"
+    elif crystal_only:
+        suffix = "_crystal_only"
     fig.savefig(f"{plots_dir}/Comparison_Model_SF_{SF}{suffix}.png", dpi=300, bbox_inches='tight')
     fig.savefig(f"{plots_dir}/Comparison_Model_SF_{SF}{suffix}.pdf", bbox_inches='tight')   
 
@@ -115,3 +119,4 @@ if __name__ == '__main__':
 
     plot_execution_times(csv_file_path, args.SF)
     plot_execution_times(csv_file_path, args.SF, True)
+    plot_execution_times(csv_file_path, args.SF, False, True)
