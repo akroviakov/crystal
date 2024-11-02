@@ -10,7 +10,7 @@ def extract_filename(path):
     file_name = os.path.splitext(base_name)[0]
     return file_name
 
-def plot_execution_times(file, SF, reduced_plot=False, crystal_only=False, best_vec_comp=False):
+def plot_execution_times(file, SF, reduced_plot=False, crystal_only=False, vector_smem=False):
     colors = ['#0072B2', '#D55E00', '#56B4E9', '#009E73', '#F0E442', '#E69F00', '#CC79A7', '#000000']
     # grayscale_colors = ['lightgray', 'dimgray', 'gray', 'darkgray', 'black']
     # colors = ['#e0e0e0', '#a0a0a0', '#707070', '#404040', '#101010']
@@ -26,6 +26,8 @@ def plot_execution_times(file, SF, reduced_plot=False, crystal_only=False, best_
         median_execution_times = median_execution_times[["CompiledBatchToSM", "VectorOpt"]]
     elif crystal_only:
         median_execution_times = median_execution_times[["Vector", "VectorOpt"]]
+    elif vector_smem:
+        median_execution_times = median_execution_times[["Vector", "VectorOpt", "VectorSMEM", "VectorOptSMEM"]]
     proportions = median_execution_times.div(median_execution_times.max(axis=1), axis=0) * 100
     fig, ax = plt.subplots(figsize=(8, 4))
     bars = proportions.plot(kind='bar', ax=ax, color=colors[:len(proportions.columns)], edgecolor='black', zorder=2, width=0.75)
@@ -60,6 +62,8 @@ def plot_execution_times(file, SF, reduced_plot=False, crystal_only=False, best_
         suffix = "_reduced"
     elif crystal_only:
         suffix = "_crystal_only"
+    elif vector_smem:
+        suffix = "_vector_smem"
     fig.savefig(f"{plots_dir}/Comparison_Model_SF_{SF}{suffix}.png", dpi=300, bbox_inches='tight')
     fig.savefig(f"{plots_dir}/Comparison_Model_SF_{SF}{suffix}.pdf", bbox_inches='tight')   
 
@@ -120,3 +124,4 @@ if __name__ == '__main__':
     plot_execution_times(csv_file_path, args.SF)
     plot_execution_times(csv_file_path, args.SF, True)
     plot_execution_times(csv_file_path, args.SF, False, True)
+    plot_execution_times(csv_file_path, args.SF, False, False, True)
