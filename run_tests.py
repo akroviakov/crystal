@@ -145,6 +145,7 @@ if __name__ == "__main__":
 
     ssb_dir = os.path.join(script_dir, "src/ssb")
     os.chdir(ssb_dir)
+    # tested with ncu from CUDA 12.6
     all_queries=["q11.cu", "q12.cu", "q13.cu", "q21.cu", "q22.cu", "q23.cu", "q31.cu", "q32.cu","q33.cu","q34.cu","q41.cu","q42.cu","q43.cu"]
     selected_queries=["q11.cu", "q12.cu", "q13.cu", "q21.cu", "q31.cu", "q43.cu"]
     run_command(f"sed -i 's/#define SF [^ ]*/#define SF {args.sf}/g' ssb_utils.h")

@@ -149,7 +149,7 @@ __global__ void QueryKernel(int* lo_orderdate, int* lo_discount, int* lo_quantit
   if (blockIdx.x == num_tiles - 1) {
     num_tile_items = lo_num_entries - tile_offset;
   }
-  if constexpr(Impl == QueryVariant::Vector){
+  if constexpr(Impl == QueryVariant::Vector || Impl == QueryVariant::VectorSMEM){
     BlockLoad<int, BLOCK_THREADS, ITEMS_PER_THREAD>(lo_orderdate + tile_offset, items, num_tile_items);
     BlockPredGT<int, BLOCK_THREADS, ITEMS_PER_THREAD>(items, 19930000, selection_flags, num_tile_items);
     BlockPredAndLT<int, BLOCK_THREADS, ITEMS_PER_THREAD>(items, 19940000, selection_flags, num_tile_items);

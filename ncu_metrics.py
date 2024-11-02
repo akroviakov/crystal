@@ -79,19 +79,19 @@ def extract_name(name):
 
 def get_kernel_type(name):
     resultStr=""
-    if "<0," in name:
+    if "<0" in name:
         resultStr += "Vectorized"
-    elif "<1," in name:
+    elif "<1" in name:
         resultStr += "VectorizedOpt"
-    elif "<2," in name:
+    elif "<2" in name:
         resultStr += "CompiledBatchToSM"
-    elif "<3," in name:
+    elif "<3" in name:
         resultStr += "CompiledBatchToSMLocals"
-    elif "<4," in name:
+    elif "<4" in name:
         resultStr += "CompiledBatchToGPU"
-    elif "<5," in name:
+    elif "<5" in name:
         resultStr += "VectorizedSMEM"
-    elif "<6," in name:
+    elif "<6" in name:
         resultStr += "VectorizedOptSMEM"
     else:
         if "build" in name:
@@ -232,7 +232,7 @@ def reduceGBPerSUnits(dataframe, column_name):
     dataframe = dataframe[[col for col in [(column_name, 'Byte/s')] + [c for c in dataframe.columns if c != (column_name, 'Byte/s')]]]
     return dataframe
 
-def plot_parallelism_comparison(file_path, SF, reduced_plot=False, exclude_batch_to_gpu=False, vector_smem=False):
+def plot_parallelism_comparison(file_path, SF, reduced_plot=False, exclude_batch_to_gpu=False, vector_smem=False, compVsVecOptSMEM=False):
     df = readPreprocess(file_path)
     # pivot_df = hitRate(df, ("L2 hits", "sector") , ("L2 misses", "sector"), ("L2 hit rate", "%"))
     pivot_df = df[["Total DRAM traffic", "Read throughput of peak", "Executed instructions",  "Instruction latency",
@@ -266,6 +266,8 @@ def plot_parallelism_comparison(file_path, SF, reduced_plot=False, exclude_batch
             subset = subset[subset['Type'].isin(["CompiledBatchToSM", "VectorizedOpt", "Vectorized"])]
         elif vector_smem:
             subset = subset[subset['Type'].isin(["VectorizedOpt", "Vectorized", "VectorizedOptSMEM", "VectorizedSMEM"])]
+        elif compVsVecOptSMEM:
+            subset = subset[subset['Type'].isin(["CompiledBatchToSM", "VectorizedOpt", "VectorizedOptSMEM"])]
         if subset.empty:
             continue
         subset.set_index('Type')
@@ -295,6 +297,8 @@ def plot_parallelism_comparison(file_path, SF, reduced_plot=False, exclude_batch
         suffix = "_no_batch_to_gpu"
     elif vector_smem:
         suffix = "_vector_smem"
+    elif compVsVecOptSMEM:
+        suffix = "_bestvec_smem"
     fig.savefig(f"{plots_dir}/Comparison_for_{extract_filename(file_path)}{suffix}.png", dpi=300)
     fig.savefig(f"{plots_dir}/Comparison_for_{extract_filename(file_path)}{suffix}.pdf")
 
@@ -310,5 +314,5 @@ if __name__ == '__main__':
         plot_parallelism_comparison(p, args.SF)
         # plot_parallelism_comparison(p, args.SF, True)
         # plot_parallelism_comparison(p, args.SF, False, True)
-        plot_parallelism_comparison(p, args.SF, False, False, True)
-
+        # plot_parallelism_comparison(p, args.SF, False, False, True)
+        plot_parallelism_comparison(p, args.SF, False, False, False, True)

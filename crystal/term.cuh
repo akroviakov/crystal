@@ -24,7 +24,7 @@
 
 template <typename T, int BLOCK_THREADS, int ITEMS_PER_THREAD>
 __device__ __forceinline__ bool
-IsTerm(int (&selection_flags)[ITEMS_PER_THREAD]) {
+IsTerm(int * __restrict__ selection_flags) {
     int count = 0;
     for (int ITEM = 0; ITEM < ITEMS_PER_THREAD; ITEM++) {
         count += selection_flags[ITEM];

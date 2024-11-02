@@ -321,3 +321,15 @@ __device__ __forceinline__ void BlockPredAndEQ(
   Eq<T> select_op(compare);
   BlockPredAnd<T, Eq<T>, BLOCK_THREADS, ITEMS_PER_THREAD>(items, select_op, selection_flags, num_items);
 }
+
+template<typename T, int BLOCK_THREADS, int ITEMS_PER_THREAD>
+__device__ __forceinline__ void BlockPredOrEQ(
+    T* __restrict__  items,
+    T compare,
+    int* __restrict__  selection_flags,
+    int num_items
+    ) {
+  Eq<T> select_op(compare);
+  BlockPredOr<T, Eq<T>, BLOCK_THREADS, ITEMS_PER_THREAD>(items, select_op, selection_flags, num_items);
+}
+

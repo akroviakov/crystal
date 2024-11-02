@@ -285,7 +285,7 @@ float runQuery(int* lo_orderdate, int* lo_partkey, int* lo_suppkey, int* lo_reve
 
   CubDebugExit(cudaMemset(res, 0, res_array_size * sizeof(int)));
   if constexpr(QImpl == QueryVariant::Vector || QImpl == QueryVariant::VectorOpt){
-    probe<blockSizeVec,vecSize,QImpl><<<(lo_len + tile_items - 1)/tile_items, blockSizeVec>>>(lo_orderdate,
+    probe<QImpl,blockSizeVec,vecSize><<<(lo_len + tile_items - 1)/tile_items, blockSizeVec>>>(lo_orderdate,
           lo_partkey, lo_suppkey, lo_revenue, lo_len, ht_s, s_len, ht_p, p_len, ht_d, d_val_len, res);
   } else {
     auto [gridSize, blockSize] = getLaunchConfigCompiled<QImpl>(probeCompiled<QImpl>, getSMCount(), batchSize, numBatches);

@@ -106,12 +106,43 @@ __global__ void probe(int* lo_orderdate, int* lo_partkey, int* lo_custkey, int* 
     int* ht_d, int d_len,
     int* res) {
   // Load a segment of consecutive items that are blocked across threads
-  int items[ITEMS_PER_THREAD];
-  int selection_flags[ITEMS_PER_THREAD];
-  int c_nation[ITEMS_PER_THREAD];
-  int s_nation[ITEMS_PER_THREAD];
-  int year[ITEMS_PER_THREAD];
-  int revenue[ITEMS_PER_THREAD];
+  __shared__ int shared_items[BLOCK_THREADS * (ITEMS_PER_THREAD + 1)];
+  __shared__ int shared_selection_flags[BLOCK_THREADS * (ITEMS_PER_THREAD + 1)];
+  __shared__ int shared_c_nation[BLOCK_THREADS * (ITEMS_PER_THREAD + 1)];
+  __shared__ int shared_s_nation[BLOCK_THREADS * (ITEMS_PER_THREAD + 1)];
+  __shared__ int shared_year[BLOCK_THREADS * (ITEMS_PER_THREAD + 1)];
+  __shared__ int shared_revenue[BLOCK_THREADS * (ITEMS_PER_THREAD + 1)];
+
+  int local_items[ITEMS_PER_THREAD];
+  int local_selection_flags[ITEMS_PER_THREAD];
+  int local_c_nation[ITEMS_PER_THREAD];
+  int local_s_nation[ITEMS_PER_THREAD];
+  int local_year[ITEMS_PER_THREAD];
+  int local_revenue[ITEMS_PER_THREAD];
+
+  int* items;
+  int* selection_flags;
+  int* c_nation;
+  int* s_nation;
+  int* year;
+  int* revenue;
+
+  // Load a segment of consecutive items that are blocked across threads
+  if constexpr (QImpl == QueryVariant::VectorSMEM || QImpl == QueryVariant::VectorOptSMEM) {
+    items = shared_items + threadIdx.x * (ITEMS_PER_THREAD + 1);
+    selection_flags = shared_selection_flags + threadIdx.x * (ITEMS_PER_THREAD + 1);
+    c_nation = shared_c_nation + threadIdx.x * (ITEMS_PER_THREAD + 1);
+    s_nation = shared_s_nation + threadIdx.x * (ITEMS_PER_THREAD + 1);
+    year = shared_year + threadIdx.x * (ITEMS_PER_THREAD + 1);
+    revenue = shared_revenue + threadIdx.x * (ITEMS_PER_THREAD + 1);
+  } else {
+    items = local_items;
+    selection_flags = local_selection_flags;
+    c_nation = local_c_nation;
+    s_nation = local_s_nation;
+    year = local_year;
+    revenue = local_revenue;
+  }
 
   int tile_offset = blockIdx.x * TILE_SIZE;
   int num_tiles = (lo_len + TILE_SIZE - 1) / TILE_SIZE;
@@ -122,7 +153,7 @@ __global__ void probe(int* lo_orderdate, int* lo_partkey, int* lo_custkey, int* 
   }
 
   InitFlags<BLOCK_THREADS, ITEMS_PER_THREAD>(selection_flags);
-  if constexpr (QImpl == QueryVariant::Vector){
+  if constexpr (QImpl == QueryVariant::Vector || QImpl == QueryVariant::VectorSMEM){
     BlockLoad<int, BLOCK_THREADS, ITEMS_PER_THREAD>(lo_suppkey + tile_offset, items, num_tile_items);
     BlockProbeAndPHT_1<int, BLOCK_THREADS, ITEMS_PER_THREAD>(items, selection_flags, ht_s, s_len, num_tile_items);
 
@@ -310,7 +341,7 @@ float runQuery(int* lo_orderdate, int* lo_custkey, int* lo_partkey, int* lo_supp
 
   const int batchSize = getBatchSizeCompiled<QImpl>();
   const int numBatches = (lo_len + batchSize - 1)/batchSize;
-  if constexpr(QImpl == QueryVariant::Vector || QImpl == QueryVariant::VectorOpt){
+  if constexpr(QImpl == QueryVariant::Vector || QImpl == QueryVariant::VectorOpt || QImpl == QueryVariant::VectorSMEM || QImpl == QueryVariant::VectorOptSMEM){
     build_hashtable_s<128,4><<<(s_len + tile_items - 1)/tile_items, 128>>>(s_region, s_suppkey, s_len, ht_s, s_len);
     /*CHECK_ERROR();*/
     build_hashtable_c<128,4><<<(c_len + tile_items - 1)/tile_items, 128>>>(c_region, c_custkey, c_nation, c_len, ht_c, c_len);
@@ -375,7 +406,7 @@ float runQuery(int* lo_orderdate, int* lo_custkey, int* lo_partkey, int* lo_supp
   CubDebugExit(cudaMemset(res, 0, res_array_size * sizeof(int)));
 
   // Run
-  if constexpr(QImpl == QueryVariant::Vector || QImpl == QueryVariant::VectorOpt){
+  if constexpr(QImpl == QueryVariant::Vector || QImpl == QueryVariant::VectorOpt || QImpl == QueryVariant::VectorSMEM || QImpl == QueryVariant::VectorOptSMEM){
     probe<QImpl, 128,4><<<(lo_len + tile_items - 1)/tile_items, 128>>>(lo_orderdate, lo_partkey,
           lo_custkey, lo_suppkey, lo_revenue, lo_supplycost, lo_len, ht_p, p_len, ht_s, s_len, ht_c, c_len, ht_d, d_val_len, res);
   } else {
@@ -417,7 +448,7 @@ float runQuery(int* lo_orderdate, int* lo_custkey, int* lo_partkey, int* lo_supp
  */
 int main(int argc, char** argv)
 {
-  int num_trials          = 10;
+  int num_trials          = 1;
 
   // Initialize command line
   CommandLineArgs args(argc, argv);
@@ -483,22 +514,22 @@ int main(int argc, char** argv)
 
   cout << "** LOADED DATA TO GPU **" << endl;
 
-  cout << "** VECTOR TEST **" << endl;
-  for (int t = 0; t < num_trials; t++) {
-    float time_query;
-    time_query = runQuery<QueryVariant::Vector>(
-        d_lo_orderdate, d_lo_custkey, d_lo_partkey, d_lo_suppkey, d_lo_revenue, d_lo_supplycost, LO_LEN,
-        d_d_datekey, d_d_year, D_LEN,
-        d_p_partkey, d_p_mfgr, P_LEN,
-        d_s_suppkey, d_s_region, S_LEN,
-        d_c_custkey, d_c_region, d_c_nation, C_LEN,
-        g_allocator);
-    cout<< "{"
-        << "\"type\":Vector" 
-        << ",\"query\":41" 
-        << ",\"time_query\":" << time_query
-        << "}" << endl;
-  }
+  // cout << "** VECTOR TEST **" << endl;
+  // for (int t = 0; t < num_trials; t++) {
+  //   float time_query;
+  //   time_query = runQuery<QueryVariant::Vector>(
+  //       d_lo_orderdate, d_lo_custkey, d_lo_partkey, d_lo_suppkey, d_lo_revenue, d_lo_supplycost, LO_LEN,
+  //       d_d_datekey, d_d_year, D_LEN,
+  //       d_p_partkey, d_p_mfgr, P_LEN,
+  //       d_s_suppkey, d_s_region, S_LEN,
+  //       d_c_custkey, d_c_region, d_c_nation, C_LEN,
+  //       g_allocator);
+  //   cout<< "{"
+  //       << "\"type\":Vector" 
+  //       << ",\"query\":41" 
+  //       << ",\"time_query\":" << time_query
+  //       << "}" << endl;
+  // }
   cout << "** VECTOR-OPT TEST **" << endl;
   for (int t = 0; t < num_trials; t++) {
     float time_query;
@@ -511,6 +542,38 @@ int main(int argc, char** argv)
         g_allocator);
     cout<< "{"
         << "\"type\":VectorOpt" 
+        << ",\"query\":41" 
+        << ",\"time_query\":" << time_query
+        << "}" << endl;
+  }
+  // cout << "** VectorSMEM TEST **" << endl;
+  // for (int t = 0; t < num_trials; t++) {
+  //   float time_query;
+  //   time_query = runQuery<QueryVariant::VectorSMEM>(
+  //       d_lo_orderdate, d_lo_custkey, d_lo_partkey, d_lo_suppkey, d_lo_revenue, d_lo_supplycost, LO_LEN,
+  //       d_d_datekey, d_d_year, D_LEN,
+  //       d_p_partkey, d_p_mfgr, P_LEN,
+  //       d_s_suppkey, d_s_region, S_LEN,
+  //       d_c_custkey, d_c_region, d_c_nation, C_LEN,
+  //       g_allocator);
+  //   cout<< "{"
+  //       << "\"type\":VectorSMEM" 
+  //       << ",\"query\":41" 
+  //       << ",\"time_query\":" << time_query
+  //       << "}" << endl;
+  // }
+  cout << "** VectorOptSMEM TEST **" << endl;
+  for (int t = 0; t < num_trials; t++) {
+    float time_query;
+    time_query = runQuery<QueryVariant::VectorOptSMEM>(
+        d_lo_orderdate, d_lo_custkey, d_lo_partkey, d_lo_suppkey, d_lo_revenue, d_lo_supplycost, LO_LEN,
+        d_d_datekey, d_d_year, D_LEN,
+        d_p_partkey, d_p_mfgr, P_LEN,
+        d_s_suppkey, d_s_region, S_LEN,
+        d_c_custkey, d_c_region, d_c_nation, C_LEN,
+        g_allocator);
+    cout<< "{"
+        << "\"type\":VectorOptSMEM" 
         << ",\"query\":41" 
         << ",\"time_query\":" << time_query
         << "}" << endl;
@@ -531,22 +594,22 @@ int main(int argc, char** argv)
         << ",\"time_query\":" << time_query
         << "}" << endl;
   }
-  cout << "** CompiledBatchToGPU TEST **" << endl;
-  for (int t = 0; t < num_trials; t++) {
-    float time_query;
-    time_query = runQuery<QueryVariant::CompiledBatchToGPU>(
-        d_lo_orderdate, d_lo_custkey, d_lo_partkey, d_lo_suppkey, d_lo_revenue, d_lo_supplycost, LO_LEN,
-        d_d_datekey, d_d_year, D_LEN,
-        d_p_partkey, d_p_mfgr, P_LEN,
-        d_s_suppkey, d_s_region, S_LEN,
-        d_c_custkey, d_c_region, d_c_nation, C_LEN,
-        g_allocator);
-    cout<< "{"
-        << "\"type\":CompiledBatchToGPU" 
-        << ",\"query\":41" 
-        << ",\"time_query\":" << time_query
-        << "}" << endl;
-  }
+  // cout << "** CompiledBatchToGPU TEST **" << endl;
+  // for (int t = 0; t < num_trials; t++) {
+  //   float time_query;
+  //   time_query = runQuery<QueryVariant::CompiledBatchToGPU>(
+  //       d_lo_orderdate, d_lo_custkey, d_lo_partkey, d_lo_suppkey, d_lo_revenue, d_lo_supplycost, LO_LEN,
+  //       d_d_datekey, d_d_year, D_LEN,
+  //       d_p_partkey, d_p_mfgr, P_LEN,
+  //       d_s_suppkey, d_s_region, S_LEN,
+  //       d_c_custkey, d_c_region, d_c_nation, C_LEN,
+  //       g_allocator);
+  //   cout<< "{"
+  //       << "\"type\":CompiledBatchToGPU" 
+  //       << ",\"query\":41" 
+  //       << ",\"time_query\":" << time_query
+  //       << "}" << endl;
+  // }
   return 0;
 }
 
