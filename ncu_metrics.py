@@ -65,7 +65,7 @@ def extract_filename(path):
 
 def extract_kernel_type(name):
     start = name.find('void ') + len('void ')
-    end = name.find('<(')
+    end = name.find('>(')
     return name[start:end]
 
 
@@ -79,16 +79,20 @@ def extract_name(name):
 
 def get_kernel_type(name):
     resultStr=""
-    if "(QueryVariant)0" in name:
+    if "<0," in name:
         resultStr += "Vectorized"
-    elif "(QueryVariant)1" in name:
+    elif "<1," in name:
         resultStr += "VectorizedOpt"
-    elif "(QueryVariant)2" in name:
+    elif "<2," in name:
         resultStr += "CompiledBatchToSM"
-    elif "(QueryVariant)3" in name:
+    elif "<3," in name:
         resultStr += "CompiledBatchToSMLocals"
-    elif "(QueryVariant)4" in name:
+    elif "<4," in name:
         resultStr += "CompiledBatchToGPU"
+    elif "<5," in name:
+        resultStr += "VectorizedSMEM"
+    elif "<6," in name:
+        resultStr += "VectorizedOptSMEM"
     else:
         if "build" in name:
             resultStr += "Vectorized"
@@ -228,7 +232,7 @@ def reduceGBPerSUnits(dataframe, column_name):
     dataframe = dataframe[[col for col in [(column_name, 'Byte/s')] + [c for c in dataframe.columns if c != (column_name, 'Byte/s')]]]
     return dataframe
 
-def plot_parallelism_comparison(file_path, SF, reduced_plot=False, exclude_batch_to_gpu=False):
+def plot_parallelism_comparison(file_path, SF, reduced_plot=False, exclude_batch_to_gpu=False, vector_smem=False):
     df = readPreprocess(file_path)
     # pivot_df = hitRate(df, ("L2 hits", "sector") , ("L2 misses", "sector"), ("L2 hit rate", "%"))
     pivot_df = df[["Total DRAM traffic", "Read throughput of peak", "Executed instructions",  "Instruction latency",
@@ -252,27 +256,33 @@ def plot_parallelism_comparison(file_path, SF, reduced_plot=False, exclude_batch
     ncols = len(metric_columns) // 2 
     fig, axes = plt.subplots(nrows=2, ncols=ncols, figsize=(10, 5))
     axes =  axes.flatten()
-    for rowIdx, kernel_name in enumerate(unique_kernels):
-        for colIdx, metric in enumerate(metric_columns):
-            ax = axes[rowIdx * ncols + colIdx]
-            subset = pivot_df_unindexed[pivot_df_unindexed['ShortName'] == kernel_name]
-            pivot_plot_df = subset.pivot(index='ShortName', columns='Type', values=metric)
-            if reduced_plot:
-                pivot_plot_df = pivot_plot_df[["CompiledBatchToSM", "VectorizedOpt"]]
-            elif exclude_batch_to_gpu:
-                pivot_plot_df = pivot_plot_df[["CompiledBatchToSM", "VectorizedOpt", "Vectorized"]]
-            pivot_plot_df.plot(kind='bar', color=color_list[:len(pivot_plot_df.columns)], ax=ax, edgecolor='black', legend=False, zorder=2, width=0.6)
-            for i, bar in enumerate(ax.patches):
-                bar.set_hatch(color_to_hatch[bar.get_facecolor()]) 
-            ax.grid(axis='y',zorder=1)
-            ax.set_title(metric)
-            ax.set_ylabel("")
-            ax.set_xlabel("")
-            ax.set_xticklabels(ax.get_xticklabels(), rotation=0, ha='center')
-            ax.margins(x=0.01)
-        last_subplot = axes[rowIdx * ncols + ncols-1]
-        handles, labels = last_subplot.get_legend_handles_labels()
-        last_subplot.legend(handles, labels, loc='center left', bbox_to_anchor=(0.1, -0.5), fontsize=10)
+    for colIdx, metric in enumerate(metric_columns):
+        ax = axes[colIdx]
+        subset = pivot_df_unindexed[["Type", metric]]
+        # ncu versions can have different output formats, this code is for ncu from CUDA 12.6.
+        if reduced_plot:
+            subset = subset[subset['Type'].isin(["CompiledBatchToSM", "VectorizedOpt"])]
+        elif exclude_batch_to_gpu:
+            subset = subset[subset['Type'].isin(["CompiledBatchToSM", "VectorizedOpt", "Vectorized"])]
+        elif vector_smem:
+            subset = subset[subset['Type'].isin(["VectorizedOpt", "Vectorized", "VectorizedOptSMEM", "VectorizedSMEM"])]
+        if subset.empty:
+            continue
+        subset.set_index('Type')
+        subset = subset.pivot_table(index=None, columns='Type', values=metric)
+        subset.plot(kind='bar', color=color_list[:len(subset.columns)], ax=ax, edgecolor='black', legend=False, zorder=2, width=0.6)
+        for i, bar in enumerate(ax.patches):
+            bar.set_hatch(color_to_hatch[bar.get_facecolor()]) 
+        ax.grid(axis='y',zorder=1)
+        ax.set_title(metric)
+        ax.set_ylabel("")
+        ax.set_xlabel("")
+        ax.set_xticklabels([])
+        # ax.set_xticklabels(ax.get_xticklabels(), rotation=0, ha='center')
+        ax.margins(x=0.01)
+    last_subplot = axes[len(metric_columns)-1]
+    handles, labels = last_subplot.get_legend_handles_labels()
+    last_subplot.legend(handles, labels, loc='center left', bbox_to_anchor=(0.1, -0.6), fontsize=10)
     fig.tight_layout(pad=0.5)  # Adjust padding as needed
 
     plots_dir=f"Plots/SF_{SF}/Metrics"
@@ -283,6 +293,8 @@ def plot_parallelism_comparison(file_path, SF, reduced_plot=False, exclude_batch
         suffix = "_reduced"
     elif exclude_batch_to_gpu:
         suffix = "_no_batch_to_gpu"
+    elif vector_smem:
+        suffix = "_vector_smem"
     fig.savefig(f"{plots_dir}/Comparison_for_{extract_filename(file_path)}{suffix}.png", dpi=300)
     fig.savefig(f"{plots_dir}/Comparison_for_{extract_filename(file_path)}{suffix}.pdf")
 
@@ -296,6 +308,7 @@ if __name__ == '__main__':
     for p in glob.glob(f"{args.CSV_DIR}/*.csv"):
         # plot_metric(p, args.SF)
         plot_parallelism_comparison(p, args.SF)
-        plot_parallelism_comparison(p, args.SF, True)
-        plot_parallelism_comparison(p, args.SF, False, True)
+        # plot_parallelism_comparison(p, args.SF, True)
+        # plot_parallelism_comparison(p, args.SF, False, True)
+        plot_parallelism_comparison(p, args.SF, False, False, True)
 

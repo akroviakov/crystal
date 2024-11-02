@@ -50,7 +50,7 @@ __global__ void DeviceSelectIfCompiled(int* lo_orderdate, int* lo_discount, int*
   }
 }
 
-template<int BLOCK_THREADS, int ITEMS_PER_THREAD, QueryVariant QImpl>
+template<QueryVariant QImpl, int BLOCK_THREADS, int ITEMS_PER_THREAD>
 __global__ void DeviceSelectIf(int* lo_orderdate, int* lo_discount, int* lo_quantity, int* lo_extendedprice,
     int lo_num_entries, unsigned long long* revenue) {
   // Load a segment of consecutive items that are blocked across threads
@@ -145,7 +145,7 @@ float runQuery(int* lo_orderdate, int* lo_discount, int* lo_quantity, int* lo_ex
   // Run
   if constexpr(QImpl == QueryVariant::Vector || QImpl == QueryVariant::VectorOpt){
   int tile_items = 128*4;
-  DeviceSelectIf<128,4,QImpl><<<(lo_num_entries + tile_items - 1)/tile_items, 128>>>(lo_orderdate, 
+  DeviceSelectIf<QImpl, 128,4><<<(lo_num_entries + tile_items - 1)/tile_items, 128>>>(lo_orderdate, 
           lo_discount, lo_quantity, lo_extendedprice, lo_num_entries, d_sum);
   } else {
     const int batchSize = getBatchSizeCompiled<QImpl>();

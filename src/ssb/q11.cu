@@ -110,13 +110,35 @@ __global__ void QueryKernelCompiled(const int* lo_orderdate, const int* lo_disco
   }
 }
 
-template<int BLOCK_THREADS, int ITEMS_PER_THREAD, QueryVariant Impl>
+template<QueryVariant Impl, int BLOCK_THREADS, int ITEMS_PER_THREAD>
 __global__ void QueryKernel(int* lo_orderdate, int* lo_discount, int* lo_quantity, int* lo_extendedprice,
     int lo_num_entries, unsigned long long* revenue) {
+
+  __shared__ int shared_items[BLOCK_THREADS *(ITEMS_PER_THREAD+1)];
+  __shared__ int shared_selection_flags[BLOCK_THREADS *(ITEMS_PER_THREAD+1)];
+  __shared__ int shared_items2[BLOCK_THREADS *(ITEMS_PER_THREAD+1)];
+
+  int local_items[ITEMS_PER_THREAD];
+  int local_selection_flags[ITEMS_PER_THREAD];
+  int local_items2[ITEMS_PER_THREAD];
+
+  int* items;
+  int* selection_flags;
+  int* items2;
+
   // Load a segment of consecutive items that are blocked across threads
-  int items[ITEMS_PER_THREAD];
-  int selection_flags[ITEMS_PER_THREAD];
-  int items2[ITEMS_PER_THREAD];
+  if constexpr (Impl == QueryVariant::VectorSMEM || Impl == QueryVariant::VectorOptSMEM) {
+    items = shared_items + threadIdx.x * (ITEMS_PER_THREAD+1);
+    selection_flags = shared_selection_flags + threadIdx.x * (ITEMS_PER_THREAD+1);
+    items2 = shared_items2 + threadIdx.x * (ITEMS_PER_THREAD+1);
+  } else {
+    items = local_items;
+    selection_flags = local_selection_flags;
+    items2 = local_items2;
+  } 
+  // Let the compiler decide which allocations to optimize away, we want convenient testing
+
+
 
   unsigned long long sum = 0;
 
@@ -191,12 +213,12 @@ float runQuery(int* lo_orderdate, int* lo_discount, int* lo_quantity, int* lo_ex
 
   // Run
   unsigned long long* locals;
-  if constexpr(QImpl == QueryVariant::Vector || QImpl == QueryVariant::VectorOpt){
+  if constexpr(QImpl == QueryVariant::Vector || QImpl == QueryVariant::VectorOpt || QImpl == QueryVariant::VectorSMEM || QImpl == QueryVariant::VectorOptSMEM){
     constexpr int numThreads{128};
     constexpr int elemPerThread = 4;
     constexpr int tile_items = numThreads*elemPerThread;
     constexpr int numBlocks = (LO_LEN + tile_items - 1)/tile_items;
-    QueryKernel<numThreads,elemPerThread, QImpl><<<numBlocks, numThreads>>>(lo_orderdate, 
+    QueryKernel<QImpl, numThreads,elemPerThread><<<numBlocks, numThreads>>>(lo_orderdate, 
           lo_discount, lo_quantity, lo_extendedprice, lo_num_entries, d_sum);
   } else {
     /* DATA INFO */
@@ -304,7 +326,7 @@ int main(int argc, char** argv)
   cout << "** LOADED DATA TO GPU **" << endl;
 
   cout << "** VECTOR TEST **" << endl;
-  for (int t = 0; t < num_trials+1; t++) {
+  for (int t = 0; t < num_trials; t++) {
     float time_query;
     time_query = runQuery<QueryVariant::Vector>(d_lo_orderdate, d_lo_discount, d_lo_quantity, d_lo_extendedprice, LO_LEN, g_allocator);
     cout<< "{"
@@ -325,6 +347,31 @@ int main(int argc, char** argv)
         << ",\"batch_size\":" << externalBatchSize
         << "}" << endl;
   }
+
+  cout << "** VectorSMEM TEST **" << endl;
+  for (int t = 0; t < num_trials; t++) {
+    float time_query;
+    time_query = runQuery<QueryVariant::VectorSMEM>(d_lo_orderdate, d_lo_discount, d_lo_quantity, d_lo_extendedprice, LO_LEN, g_allocator);
+    cout<< "{"
+        << "\"type\":VectorSMEM" 
+        << ",\"query\":11" 
+        << ",\"time_query\":" << time_query
+        << ",\"batch_size\":" << externalBatchSize
+        << "}" << endl;
+  }
+
+  cout << "** VectorOptSMEM TEST **" << endl;
+  for (int t = 0; t < num_trials; t++) {
+    float time_query;
+    time_query = runQuery<QueryVariant::VectorOptSMEM>(d_lo_orderdate, d_lo_discount, d_lo_quantity, d_lo_extendedprice, LO_LEN, g_allocator);
+    cout<< "{"
+        << "\"type\":VectorOptSMEM" 
+        << ",\"query\":11" 
+        << ",\"time_query\":" << time_query
+        << ",\"batch_size\":" << externalBatchSize
+        << "}" << endl;
+  }
+
   cout << "** CompiledBatchToSM TEST **" << endl;
   for (int t = 0; t < num_trials; t++) {
     float time_query;
@@ -336,6 +383,7 @@ int main(int argc, char** argv)
         << ",\"batch_size\":" << externalBatchSize
         << "}" << endl;
   }
+  
   // cout << "** CompiledBatchToSMLocals TEST **" << endl;
   // for (int t = 0; t < num_trials; t++) {
   //   float time_query;

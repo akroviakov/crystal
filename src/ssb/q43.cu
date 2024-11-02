@@ -106,7 +106,7 @@ __global__ void build_hashtable_d_Compiled(int *dim_key, int *dim_val, int num_t
   scanLoop<QImpl>(num_tuples, batchSize, body);
 }
 
-template<int BLOCK_THREADS, int ITEMS_PER_THREAD, QueryVariant QImpl>
+template<QueryVariant QImpl, int BLOCK_THREADS, int ITEMS_PER_THREAD>
 __global__ void probe(int* lo_orderdate, int* lo_partkey, int* lo_custkey, int* lo_suppkey, int* lo_revenue, int* lo_supplycost, int lo_len,
     int* ht_p, int p_len,
     int* ht_s, int s_len,
@@ -358,7 +358,7 @@ float runQuery(int* lo_orderdate, int* lo_custkey, int* lo_partkey, int* lo_supp
 
   // Run
   if constexpr(QImpl == QueryVariant::Vector || QImpl == QueryVariant::VectorOpt){
-    probe<128,4,QImpl><<<(lo_len + tile_items - 1)/tile_items, 128>>>(lo_orderdate, lo_partkey,
+    probe<QImpl, 128,4><<<(lo_len + tile_items - 1)/tile_items, 128>>>(lo_orderdate, lo_partkey,
           lo_custkey, lo_suppkey, lo_revenue, lo_supplycost, lo_len, ht_p, p_len, ht_s, s_len, ht_c, c_len, ht_d, d_val_len, res);
   } else {
     auto [gridSize, blockSize] = getLaunchConfigCompiled<QImpl>(probeCompiled<QImpl>, getSMCount(), batchSize, numBatches);

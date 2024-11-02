@@ -33,7 +33,9 @@ enum QueryVariant {
   VectorOpt = 1,
   CompiledBatchToSM = 2,
   CompiledBatchToSMLocals = 3,
-  CompiledBatchToGPU = 4
+  CompiledBatchToGPU = 4,
+  VectorSMEM = 5,
+  VectorOptSMEM = 6
 };
 
 enum Prefetch {

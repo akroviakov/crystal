@@ -53,7 +53,7 @@ __global__ void probeCompiled(int* lo_orderdate, int* lo_partkey, int* lo_suppke
   scanLoop<QImpl>(lo_len, batchSize, body);
 }
 
-template<int BLOCK_THREADS, int ITEMS_PER_THREAD, QueryVariant QImpl>
+template<QueryVariant QImpl, int BLOCK_THREADS, int ITEMS_PER_THREAD>
 __global__ void probe(int* lo_orderdate, int* lo_partkey, int* lo_suppkey, int* lo_revenue, int lo_len,
     int* ht_s, int s_len,
     int* ht_p, int p_len,

@@ -24,10 +24,10 @@
 
 template <typename T, int BLOCK_THREADS, int ITEMS_PER_THREAD>
 __device__ __forceinline__ void
-BlockPredLoadDirect(const unsigned int tid, T *block_itr,
-                    T (&items)[ITEMS_PER_THREAD],
-                    int (&selection_flags)[ITEMS_PER_THREAD]) {
-  T *thread_itr = block_itr + tid;
+BlockPredLoadDirect(const unsigned int tid, T* block_itr,
+                    T* __restrict__  items,
+                    int* selection_flags) {
+  T* thread_itr = block_itr + tid;
 
 #pragma unroll
   for (int ITEM = 0; ITEM < ITEMS_PER_THREAD; ITEM++) {
@@ -39,10 +39,10 @@ BlockPredLoadDirect(const unsigned int tid, T *block_itr,
 
 template <typename T, int BLOCK_THREADS, int ITEMS_PER_THREAD>
 __device__ __forceinline__ void
-BlockPredLoadDirect(const unsigned int tid, T *block_itr,
-                    T (&items)[ITEMS_PER_THREAD], int num_items,
-                    int (&selection_flags)[ITEMS_PER_THREAD]) {
-  T *thread_itr = block_itr + tid;
+BlockPredLoadDirect(const unsigned int tid, T* block_itr,
+                    T* __restrict__  items, int num_items,
+                    int* selection_flags) {
+  T* thread_itr = block_itr + tid;
 
 #pragma unroll
   for (int ITEM = 0; ITEM < ITEMS_PER_THREAD; ITEM++) {
@@ -56,9 +56,9 @@ BlockPredLoadDirect(const unsigned int tid, T *block_itr,
 
 template <typename T, int BLOCK_THREADS, int ITEMS_PER_THREAD>
 __device__ __forceinline__ void
-BlockPredLoad(T *inp, T (&items)[ITEMS_PER_THREAD], int num_items,
-              int (&selection_flags)[ITEMS_PER_THREAD]) {
-  T *block_itr = inp;
+BlockPredLoad(T* inp, T* __restrict__  items, int num_items,
+              int* selection_flags) {
+  T* block_itr = inp;
 
   if ((BLOCK_THREADS * ITEMS_PER_THREAD) == num_items) {
     BlockPredLoadDirect<T, BLOCK_THREADS, ITEMS_PER_THREAD>(
@@ -73,7 +73,7 @@ template<typename T, int BLOCK_THREADS, int ITEMS_PER_THREAD>
 __device__ __forceinline__ void BlockLoadDirect(
     const unsigned int tid,
     T* block_itr,
-    T  (&items)[ITEMS_PER_THREAD]
+    T* items
     ) {
   T* thread_itr = block_itr + tid;
 
@@ -87,7 +87,7 @@ template<typename T, int BLOCK_THREADS, int ITEMS_PER_THREAD>
 __device__ __forceinline__ void BlockLoadDirect(
     const unsigned int tid,
     T* block_itr,
-    T  (&items)[ITEMS_PER_THREAD],
+    T* __restrict__  items,
     int num_items
     ) {
   T* thread_itr = block_itr + tid;
@@ -103,7 +103,7 @@ __device__ __forceinline__ void BlockLoadDirect(
 template<typename T, int BLOCK_THREADS, int ITEMS_PER_THREAD>
 __device__ __forceinline__ void BlockLoad(
     T* inp,
-    T  (&items)[ITEMS_PER_THREAD],
+    T* __restrict__  items,
     int num_items
     ) {
   T* block_itr = inp;
@@ -121,7 +121,7 @@ template<typename T, int BLOCK_THREADS, int ITEMS_PER_THREAD>
 __device__ __forceinline__ void BlockLoadDirect(
     int tid,
     T* block_itr,
-    T  (&items)[ITEMS_PER_THREAD]
+    T* items
     ) {
   T* thread_itr = block_itr + tid;
 
@@ -135,7 +135,7 @@ template<typename T, int BLOCK_THREADS, int ITEMS_PER_THREAD>
 __device__ __forceinline__ void BlockLoadDirect(
     int tid,
     T* block_itr,
-    T  (&items)[ITEMS_PER_THREAD]
+    T* __restrict__  items,
     int num_items
     ) {
   T* thread_itr = block_itr + tid;
@@ -151,7 +151,7 @@ __device__ __forceinline__ void BlockLoadDirect(
 template<typename T, int BLOCK_THREADS, int ITEMS_PER_THREAD>
 __device__ __forceinline__ void BlockLoad(
     T* inp,
-    T  (&items)[ITEMS_PER_THREAD]
+    T* __restrict__  items,
     int num_items
     ) {
   T* block_itr = inp + blockIdx.x * blockDim.x;

@@ -2,7 +2,7 @@
 
 template<int BLOCK_THREADS, int ITEMS_PER_THREAD>
 __device__ __forceinline__ void InitFlags(
-    int  (&selection_flags)[ITEMS_PER_THREAD]
+    int* selection_flags
     ) {
   #pragma unroll
   for (int ITEM = 0; ITEM < ITEMS_PER_THREAD; ITEM++) {
@@ -13,9 +13,9 @@ __device__ __forceinline__ void InitFlags(
 template<typename T, typename SelectOp, int BLOCK_THREADS, int ITEMS_PER_THREAD>
 __device__ __forceinline__ void BlockPredDirect(
     int tid,
-    T  (&items)[ITEMS_PER_THREAD],
+    T* __restrict__  items,
     SelectOp select_op,
-    int  (&selection_flags)[ITEMS_PER_THREAD]
+    int* selection_flags
     ) {
   #pragma unroll
   for (int ITEM = 0; ITEM < ITEMS_PER_THREAD; ITEM++) {
@@ -26,9 +26,9 @@ __device__ __forceinline__ void BlockPredDirect(
 template<typename T, typename SelectOp, int BLOCK_THREADS, int ITEMS_PER_THREAD>
 __device__ __forceinline__ void BlockPredDirect(
     int tid,
-    T  (&items)[ITEMS_PER_THREAD],
+    T* __restrict__  items,
     SelectOp select_op,
-    int  (&selection_flags)[ITEMS_PER_THREAD],
+    int* __restrict__  selection_flags,
     int num_items
     ) {
   #pragma unroll
@@ -41,9 +41,9 @@ __device__ __forceinline__ void BlockPredDirect(
 
 template<typename T, typename SelectOp, int BLOCK_THREADS, int ITEMS_PER_THREAD>
 __device__ __forceinline__ void BlockPred(
-    T  (&items)[ITEMS_PER_THREAD],
+    T* __restrict__  items,
     SelectOp select_op,
-    int  (&selection_flags)[ITEMS_PER_THREAD],
+    int* __restrict__  selection_flags,
     int num_items
     ) {
 
@@ -57,9 +57,9 @@ __device__ __forceinline__ void BlockPred(
 template<typename T, typename SelectOp, int BLOCK_THREADS, int ITEMS_PER_THREAD>
 __device__ __forceinline__ void BlockPredAndDirect(
     int tid,
-    T  (&items)[ITEMS_PER_THREAD],
+    T* __restrict__  items,
     SelectOp select_op,
-    int  (&selection_flags)[ITEMS_PER_THREAD]
+    int* selection_flags
     ) {
   #pragma unroll
   for (int ITEM = 0; ITEM < ITEMS_PER_THREAD; ITEM++) {
@@ -70,9 +70,9 @@ __device__ __forceinline__ void BlockPredAndDirect(
 template<typename T, typename SelectOp, int BLOCK_THREADS, int ITEMS_PER_THREAD>
 __device__ __forceinline__ void BlockPredAndDirect(
     int tid,
-    T  (&items)[ITEMS_PER_THREAD],
+    T* __restrict__  items,
     SelectOp select_op,
-    int  (&selection_flags)[ITEMS_PER_THREAD],
+    int* __restrict__  selection_flags,
     int num_items
     ) {
   #pragma unroll
@@ -85,9 +85,9 @@ __device__ __forceinline__ void BlockPredAndDirect(
 
 template<typename T, typename SelectOp, int BLOCK_THREADS, int ITEMS_PER_THREAD>
 __device__ __forceinline__ void BlockPredAnd(
-    T  (&items)[ITEMS_PER_THREAD],
+    T* __restrict__  items,
     SelectOp select_op,
-    int  (&selection_flags)[ITEMS_PER_THREAD],
+    int* __restrict__  selection_flags,
     int num_items
     ) {
 
@@ -101,9 +101,9 @@ __device__ __forceinline__ void BlockPredAnd(
 template<typename T, typename SelectOp, int BLOCK_THREADS, int ITEMS_PER_THREAD>
 __device__ __forceinline__ void BlockPredOrDirect(
     int tid,
-    T  (&items)[ITEMS_PER_THREAD],
+    T* __restrict__  items,
     SelectOp select_op,
-    int  (&selection_flags)[ITEMS_PER_THREAD]
+    int* selection_flags
     ) {
   #pragma unroll
   for (int ITEM = 0; ITEM < ITEMS_PER_THREAD; ITEM++) {
@@ -114,9 +114,9 @@ __device__ __forceinline__ void BlockPredOrDirect(
 template<typename T, typename SelectOp, int BLOCK_THREADS, int ITEMS_PER_THREAD>
 __device__ __forceinline__ void BlockPredOrDirect(
     int tid,
-    T  (&items)[ITEMS_PER_THREAD],
+    T* __restrict__  items,
     SelectOp select_op,
-    int  (&selection_flags)[ITEMS_PER_THREAD],
+    int* __restrict__  selection_flags,
     int num_items
     ) {
   #pragma unroll
@@ -129,9 +129,9 @@ __device__ __forceinline__ void BlockPredOrDirect(
 
 template<typename T, typename SelectOp, int BLOCK_THREADS, int ITEMS_PER_THREAD>
 __device__ __forceinline__ void BlockPredOr(
-    T  (&items)[ITEMS_PER_THREAD],
+    T* __restrict__  items,
     SelectOp select_op,
-    int  (&selection_flags)[ITEMS_PER_THREAD],
+    int* __restrict__  selection_flags,
     int num_items
     ) {
 
@@ -214,9 +214,9 @@ struct Eq
 
 template<typename T, int BLOCK_THREADS, int ITEMS_PER_THREAD>
 __device__ __forceinline__ void BlockPredLT(
-    T  (&items)[ITEMS_PER_THREAD],
+    T* __restrict__  items,
     T compare,
-    int  (&selection_flags)[ITEMS_PER_THREAD],
+    int* __restrict__  selection_flags,
     int num_items
     ) {
   LessThan<T> select_op(compare);
@@ -225,9 +225,9 @@ __device__ __forceinline__ void BlockPredLT(
 
 template<typename T, int BLOCK_THREADS, int ITEMS_PER_THREAD>
 __device__ __forceinline__ void BlockPredAndLT(
-    T  (&items)[ITEMS_PER_THREAD],
+    T* __restrict__  items,
     T compare,
-    int  (&selection_flags)[ITEMS_PER_THREAD],
+    int* __restrict__  selection_flags,
     int num_items
     ) {
   LessThan<T> select_op(compare);
@@ -236,9 +236,9 @@ __device__ __forceinline__ void BlockPredAndLT(
 
 template<typename T, int BLOCK_THREADS, int ITEMS_PER_THREAD>
 __device__ __forceinline__ void BlockPredGT(
-    T  (&items)[ITEMS_PER_THREAD],
+    T* __restrict__  items,
     T compare,
-    int  (&selection_flags)[ITEMS_PER_THREAD],
+    int* __restrict__  selection_flags,
     int num_items
     ) {
   GreaterThan<T> select_op(compare);
@@ -247,9 +247,9 @@ __device__ __forceinline__ void BlockPredGT(
 
 template<typename T, int BLOCK_THREADS, int ITEMS_PER_THREAD>
 __device__ __forceinline__ void BlockPredAndGT(
-    T  (&items)[ITEMS_PER_THREAD],
+    T* __restrict__  items,
     T compare,
-    int  (&selection_flags)[ITEMS_PER_THREAD],
+    int* __restrict__  selection_flags,
     int num_items
     ) {
   GreaterThan<T> select_op(compare);
@@ -258,9 +258,9 @@ __device__ __forceinline__ void BlockPredAndGT(
 
 template<typename T, int BLOCK_THREADS, int ITEMS_PER_THREAD>
 __device__ __forceinline__ void BlockPredLTE(
-    T  (&items)[ITEMS_PER_THREAD],
+    T* __restrict__  items,
     T compare,
-    int  (&selection_flags)[ITEMS_PER_THREAD],
+    int* __restrict__  selection_flags,
     int num_items
     ) {
   LessThanEq<T> select_op(compare);
@@ -269,9 +269,9 @@ __device__ __forceinline__ void BlockPredLTE(
 
 template<typename T, int BLOCK_THREADS, int ITEMS_PER_THREAD>
 __device__ __forceinline__ void BlockPredAndLTE(
-    T  (&items)[ITEMS_PER_THREAD],
+    T* __restrict__  items,
     T compare,
-    int  (&selection_flags)[ITEMS_PER_THREAD],
+    int* __restrict__  selection_flags,
     int num_items
     ) {
   LessThanEq<T> select_op(compare);
@@ -280,9 +280,9 @@ __device__ __forceinline__ void BlockPredAndLTE(
 
 template<typename T, int BLOCK_THREADS, int ITEMS_PER_THREAD>
 __device__ __forceinline__ void BlockPredGTE(
-    T  (&items)[ITEMS_PER_THREAD],
+    T* __restrict__  items,
     T compare,
-    int  (&selection_flags)[ITEMS_PER_THREAD],
+    int* __restrict__  selection_flags,
     int num_items
     ) {
   GreaterThanEq<T> select_op(compare);
@@ -291,9 +291,9 @@ __device__ __forceinline__ void BlockPredGTE(
 
 template<typename T, int BLOCK_THREADS, int ITEMS_PER_THREAD>
 __device__ __forceinline__ void BlockPredAndGTE(
-    T  (&items)[ITEMS_PER_THREAD],
+    T* __restrict__  items,
     T compare,
-    int  (&selection_flags)[ITEMS_PER_THREAD],
+    int* __restrict__  selection_flags,
     int num_items
     ) {
   GreaterThanEq<T> select_op(compare);
@@ -302,9 +302,9 @@ __device__ __forceinline__ void BlockPredAndGTE(
 
 template<typename T, int BLOCK_THREADS, int ITEMS_PER_THREAD>
 __device__ __forceinline__ void BlockPredEQ(
-    T  (&items)[ITEMS_PER_THREAD],
+    T* __restrict__  items,
     T compare,
-    int  (&selection_flags)[ITEMS_PER_THREAD],
+    int* __restrict__  selection_flags,
     int num_items
     ) {
   Eq<T> select_op(compare);
@@ -313,23 +313,11 @@ __device__ __forceinline__ void BlockPredEQ(
 
 template<typename T, int BLOCK_THREADS, int ITEMS_PER_THREAD>
 __device__ __forceinline__ void BlockPredAndEQ(
-    T  (&items)[ITEMS_PER_THREAD],
+    T* __restrict__  items,
     T compare,
-    int  (&selection_flags)[ITEMS_PER_THREAD],
+    int* __restrict__  selection_flags,
     int num_items
     ) {
   Eq<T> select_op(compare);
   BlockPredAnd<T, Eq<T>, BLOCK_THREADS, ITEMS_PER_THREAD>(items, select_op, selection_flags, num_items);
 }
-
-template<typename T, int BLOCK_THREADS, int ITEMS_PER_THREAD>
-__device__ __forceinline__ void BlockPredOrEQ(
-    T  (&items)[ITEMS_PER_THREAD],
-    T compare,
-    int  (&selection_flags)[ITEMS_PER_THREAD],
-    int num_items
-    ) {
-  Eq<T> select_op(compare);
-  BlockPredOr<T, Eq<T>, BLOCK_THREADS, ITEMS_PER_THREAD>(items, select_op, selection_flags, num_items);
-}
-
